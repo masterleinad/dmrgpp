@@ -27,6 +27,14 @@ else()
   set(CMAKE_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 endif()
 
+# Kokkos option: enable to compile Kokkos-backed paths (requires Kokkos installed)
+option(USE_KOKKOS "Enable Kokkos support" OFF)
+if(USE_KOKKOS)
+  add_compile_definitions(USE_KOKKOS)
+  find_package(KokkosKernels 5.1 REQUIRED)
+  link_libraries(Kokkos::kokkoskernels)
+endif()
+
 add_subdirectory(util)
 set(CHECK_VALUE_TARGET util::check_values)
 
