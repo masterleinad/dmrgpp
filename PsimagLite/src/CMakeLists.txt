@@ -15,6 +15,16 @@ add_library(
   PredicateSimple.cpp
   Ainur/AinurSpirit.cpp
   Ainur/AinurConvert.cpp)
+
+# If Kokkos support is enabled, compile in the Kokkos-based GEMM wrapper
+if(USE_KOKKOS)
+  target_sources(psimaglite PRIVATE kokkos_gemm.cpp)
+  target_include_directories(psimaglite PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  # Enable the compile-time guard inside kokkos_gemm.cpp
+  target_compile_definitions(psimaglite PRIVATE ENABLE_KOKKOS_GEMM)
+  # Link against Kokkos and KokkosKernels targets
+  target_link_libraries(psimaglite PUBLIC Kokkos::kokkoskernels Kokkos::kokkos)
+endif()
 target_include_directories(psimaglite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/Io
                                              ${CMAKE_CURRENT_SOURCE_DIR}/Ainur)
 
