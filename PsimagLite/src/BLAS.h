@@ -9,6 +9,7 @@
 #ifndef PSIMAG_BLAS
 #define PSIMAG_BLAS
 #include "AllocatorCpu.h"
+#include "psimaglite_config.h"
 
 #ifdef USE_KOKKOS
 #include <kokkos_gemm.h>
@@ -1270,7 +1271,7 @@ namespace BLAS {
 	                 float*             z,
 	                 IntegerForBlasType sz)
 	{
-	#ifdef ENABLE_KOKKOS_GEMM
+	#ifdef USE_KOKKOS
 		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
 	#else
 		sgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
@@ -1291,7 +1292,7 @@ namespace BLAS {
 	                 double*            z,
 	                 IntegerForBlasType sz)
 	{
-	#ifdef ENABLE_KOKKOS_GEMM
+	#ifdef USE_KOKKOS
 		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
 	#else
 		dgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
@@ -1312,7 +1313,7 @@ namespace BLAS {
 	                 std::complex<float>*       z,
 	                 IntegerForBlasType         sz)
 	{
-	#ifdef ENABLE_KOKKOS_GEMM
+	#ifdef USE_KOKKOS
 		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
 	#else
 		cgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
@@ -1346,8 +1347,7 @@ namespace BLAS {
 				throw PsimagLite::RuntimeError("GEMM lda < max(1, k)\n");
 			}
 		}
-
-	#ifdef ENABLE_KOKKOS_GEMM
+	#ifdef USE_KOKKOS
 		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
 	#else
 		zgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
