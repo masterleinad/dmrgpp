@@ -72,6 +72,19 @@ public:
 		    "getCurrentVectorNonConst: psi or tvs cannot be modified\n");
 	}
 
+	const VectorWithOffsetType& getCurrentVectorConst(PsimagLite::String braOrKet) const
+	{
+		PsimagLite::GetBraOrKet getBraOrKet(braOrKet);
+		if (getBraOrKet.isPvector() && getBraOrKet.isLastKrylov()) {
+			const int lastSlot = timeEvolve_.getLastIndex(getBraOrKet.pIndex());
+			if (lastSlot < 0)
+				err("getCurrentVectorConst: no time evolution found for " + braOrKet
+				    + "\n");
+			return pVectors_.aoe().targetVectors(static_cast<SizeType>(lastSlot));
+		}
+		return pVectors_.getCurrentVectorConst(braOrKet);
+	}
+
 	PsimagLite::String createTemporaryVector(PsimagLite::String str) const
 	{
 		const SizeType n = tempVectors_.size();

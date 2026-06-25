@@ -825,6 +825,13 @@ private:
 	const VectorWithOffsetType* getVector(const PsimagLite::GetBraOrKet& getBraOrKet) const
 	{
 		if (getBraOrKet.isPvector()) {
+			if (getBraOrKet.isLastKrylov()) {
+				const int lastSlot = aoe_.getLastKrylovSlot(getBraOrKet.pIndex());
+				if (lastSlot < 0)
+					return nullptr;
+				const SizeType slot = static_cast<SizeType>(lastSlot);
+				return (slot >= aoe_.tvs()) ? nullptr : &(aoe_.targetVectors(slot));
+			}
 			const SizeType pIndex = getBraOrKet.pIndex();
 			return (pIndex >= aoe_.tvs()) ? nullptr : &(aoe_.targetVectors(pIndex));
 		}

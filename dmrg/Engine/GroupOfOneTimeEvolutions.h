@@ -37,6 +37,8 @@ template <typename PvectorsType> class GroupOfOneTimeEvolutions {
 				};
 
 				pVectors.createNew(src, lambda);
+				if (i == timeSteps - 1)
+					pVectors.registerLastKrylovSlot(firstIndex, indices_[i]);
 			}
 		}
 
@@ -114,6 +116,17 @@ public:
 	}
 
 	void pushBack(OneTimeEvolution* ptr) { vEvolutions_.push_back(ptr); }
+
+	int getLastIndex(SizeType firstIndex) const
+	{
+		const SizeType n = vEvolutions_.size();
+		for (SizeType i = 0; i < n; ++i) {
+			const auto& idx = vEvolutions_[i]->indices();
+			if (idx[0] == firstIndex)
+				return idx[idx.size() - 1];
+		}
+		return -1;
+	}
 
 	SizeType size() const { return vEvolutions_.size(); }
 

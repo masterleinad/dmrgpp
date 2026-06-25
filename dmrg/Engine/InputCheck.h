@@ -75,8 +75,8 @@ DISCLOSED WOULD NOT INFRINGE PRIVATELY OWNED RIGHTS.
  *
  *  InputChecking functions
  */
-#ifndef INPUT_CHECK_H
-#define INPUT_CHECK_H
+#ifndef DMRG_INPUT_CHECK_H
+#define DMRG_INPUT_CHECK_H
 #include "../../PsimagLite/src/Options.h"
 #include "Geometry/Geometry.h"
 #include "MatrixVectorKron/BatchedGemmInclude.hh"

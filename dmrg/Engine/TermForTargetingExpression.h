@@ -224,7 +224,7 @@ private:
 	                 SizeType            site)
 	{
 		assert(siteCanBeApplied(site));
-		const VectorWithOffsetType& srcVwo = aux_.pVectors().getCurrentVectorConst(srcKet);
+		const VectorWithOffsetType& srcVwo       = aux_.getCurrentVectorConst(srcKet);
 		PsimagLite::String          internalName = aux_.createTemporaryVector(destKet);
 		VectorWithOffsetType&       destVwo = aux_.getCurrentVectorNonConst(internalName);
 		applyInSitu(destVwo, srcVwo, site, op);

@@ -1,0 +1,4 @@
+add_executable(test_LastKrylovSlots test_LastKrylovSlots.cpp)
+target_link_libraries(test_LastKrylovSlots PRIVATE Catch2::Catch2WithMain psimaglite)
+target_include_directories(test_LastKrylovSlots PRIVATE ${CMAKE_SOURCE_DIR}/dmrg/Engine)
+catch_discover_tests(test_LastKrylovSlots)

@@ -1,7 +1,7 @@
 #ifndef GETBRAORKET_H
 #define GETBRAORKET_H
+#include "PsimagLite.h"
 #include "Vector.h"
-#include <cstdlib>
 
 namespace PsimagLite {
 
@@ -23,6 +23,7 @@ public:
 	    , braOrKet_(braOrKet)
 	    , kind_(Kind::E)
 	    , pair_(0, 0)
+	    , isLastKrylov_(false)
 	{
 		const SizeType l = braOrKet.length();
 		if (l < 2)
@@ -45,6 +46,8 @@ public:
 	bool isPvector() const { return (kind_ == Kind::P); }
 
 	bool isRvector() const { return (kind_ == Kind::R); }
+
+	bool isLastKrylov() const { return isLastKrylov_; }
 
 	SizeType levelIndex() const
 	{
@@ -100,6 +103,11 @@ private:
 		if (str.size() < 2)
 			return;
 
+		if (str == ".last") {
+			isLastKrylov_ = true;
+			return;
+		}
+
 		if (str[0] == 'X') {
 			pair_.second = getNumberFrom(str, 1); // modifies str
 		} else {
@@ -132,6 +140,7 @@ private:
 	String       braOrKet_;
 	Kind         kind_;
 	PairSizeType pair_;
+	bool         isLastKrylov_;
 };
 } // namespace PsimagLite
 #endif // GETBRAORKET_H

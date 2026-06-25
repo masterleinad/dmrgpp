@@ -74,6 +74,7 @@ DISCLOSED WOULD NOT INFRINGE PRIVATELY OWNED RIGHTS.
 #include "ApplyOperatorLocal.h"
 #include "CorrelationsSkeleton.h"
 #include "Io/IoSelector.h"
+#include "LastKrylovSlots.h"
 #include "MultiSiteExpressionHelper.h"
 #include "ProgressIndicator.h"
 #include "StageEnum.h"
@@ -452,6 +453,13 @@ public:
 		*targetVectors_[n] = vv;
 		return n;
 	}
+
+	void registerLastKrylovSlot(SizeType pIndex, SizeType slotIndex)
+	{
+		lastKrylovSlots_.registerSlot(pIndex, slotIndex);
+	}
+
+	int getLastKrylovSlot(SizeType pIndex) const { return lastKrylovSlots_.getSlot(pIndex); }
 
 	void destroyPvector(SizeType ind)
 	{
@@ -904,6 +912,7 @@ private:
 	ApplyOperatorType                     applyOpLocal_;
 	VectorVectorVectorWithOffsetType      psi_;
 	VectorVectorWithOffsetType            targetVectors_;
+	LastKrylovSlots                       lastKrylovSlots_;
 	TimeVectorsBaseType*                  timeVectorsBase_;
 	WftHelperType                         wftHelper_;
 	mutable MultiSiteExpressionHelperType multiSiteExprHelper_;

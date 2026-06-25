@@ -72,7 +72,7 @@ public:
 		OneTimeEvolutionType* oneTimeEvolution
 		    = aux_.timeEvolve().findThisEvolution(firstIndex);
 
-		const VectorWithOffsetType* srcVwo = &aux_.pVectors().getCurrentVectorConst(srcKet);
+		const VectorWithOffsetType* srcVwo = &aux_.getCurrentVectorConst(srcKet);
 		if (srcVwo->size() == 0 && !oneTimeEvolution)
 			return false;
 

@@ -1,0 +1,40 @@
+##Ainur1.0
+
+# U=0 -> U=2 interaction quench at the impurity (site 0), step 2 of 2.
+# Restarts from data9102 (which holds P0 = c'[0]*|GS_i> with |GS_i> = U=0 GS).
+# The "2" FiniteLoops flag keeps |gs> as the WFT-transformed |GS_i> throughout.
+#
+# P1 = e^{-iH_f t} c'|GS_i>   (particle target, N+1 sector)
+# P2 = e^{-iH_f t} |GS_i>     (evolved bra, N sector)
+#
+# In-situ measurement <P2|c|P1> = <GS_i|e^{iH_f t} c e^{-iH_f t} c'|GS_i> = G^>(t,0)
+# <P2.last|P2> gives the consecutive N-sector overlap for gauge-phase correction.
+
+TotalNumberOfSites=6;
+NumberOfTerms=1;
+DegreesOfFreedom=1;
+GeometryKind=star;
+GeometryOptions=none;
+hubbardU=[2, 0., 0., 0., 0., 0.];
+Model=HubbardOneBand;
+SolverOptions=twositedmrg,geometryallinsystem,TargetingExpression,restart,usecomplex;
+Version=GSquench-unit-test;
+OutputFile=data9103;
+InfiniteLoopKeptStates=50;
+FiniteLoops=[
+    [@auto, 50, 2], [@auto, 50, 2],
+    [@auto, 50, 2], [@auto, 50, 2],
+    [@auto, 50, 2], [@auto, 50, 2]];
+TargetElectronsUp=3;
+TargetElectronsDown=3;
+dir0:Connectors=[0.5, 0.5, 0.5, 0.5, 0.5];
+potentialV=[0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0];
+RestartFilename=data9102;
+RestartMappingTvs=[0, -1, -1];
+string P0=|P0>;
+string P1="TimeEvolve{tau=0.1,steps=5,advanceEach=4}*|P0>";
+string P2="TimeEvolve{tau=0.1,steps=5,advanceEach=4}*|gs>";
+GsWeight=0.1;
+
+#ci dmrg arguments="<P2|c|P1>,<P2.last|P2>"

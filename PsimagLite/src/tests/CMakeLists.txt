@@ -14,3 +14,7 @@ catch_discover_tests(testArnoldiSaI)
 add_executable(test_InputPath test_InputPath.cpp)
 target_link_libraries(test_InputPath PRIVATE Catch2::Catch2WithMain psimaglite)
 catch_discover_tests(test_InputPath)
+
+add_executable(test_GetBraOrKet test_GetBraOrKet.cpp)
+target_link_libraries(test_GetBraOrKet PRIVATE Catch2::Catch2WithMain psimaglite)
+catch_discover_tests(test_GetBraOrKet)

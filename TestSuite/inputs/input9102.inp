@@ -1,0 +1,29 @@
+##Ainur1.0
+
+# U=0 -> U=2 interaction quench at the impurity (site 0), step 1 of 2.
+# Restarts from the U=0 ground state (data9100).  FiniteLoops with the "2"
+# (fast-WFT) flag prevents DMRG from re-optimising the ground state for U=2,
+# so |gs> remains |GS_i> (U=0) WFT-transformed to the current basis.
+# Computes P0 = c'[0]*|GS_i> for use as the initial hole state in step 2.
+
+TotalNumberOfSites=6;
+NumberOfTerms=1;
+DegreesOfFreedom=1;
+GeometryKind=star;
+GeometryOptions=none;
+hubbardU=[2, 0., 0., 0., 0., 0.];
+Model=HubbardOneBand;
+SolverOptions=twositedmrg,geometryallinsystem,TargetingExpression,restart;
+Version=GSquench-unit-test;
+OutputFile=data9102;
+InfiniteLoopKeptStates=50;
+FiniteLoops=[
+    [@auto, 50, 2], [@auto, 50, 2]];
+TargetElectronsUp=3;
+TargetElectronsDown=3;
+dir0:Connectors=[0.5, 0.5, 0.5, 0.5, 0.5];
+potentialV=[0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0];
+RestartFilename=data9100;
+string P0="c'[0]*|gs>";
+GsWeight=0.1;

@@ -76,8 +76,8 @@ DISCLOSED WOULD NOT INFRINGE PRIVATELY OWNED RIGHTS.
  *
  *  InputChecking functions
  */
-#ifndef INPUT_CHECK_H
-#define INPUT_CHECK_H
+#ifndef LPP_INPUT_CHECK_H
+#define LPP_INPUT_CHECK_H
 #include "Geometry/Geometry.h"
 #include "Options.h"
 #include <stdexcept>

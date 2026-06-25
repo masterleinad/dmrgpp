@@ -101,6 +101,11 @@ public:
 		progress_.printline(msgg, std::cout);
 	}
 
+	void registerLastKrylovSlot(SizeType pIndex, SizeType slotIndex)
+	{
+		aoeNonConst().registerLastKrylovSlot(pIndex, slotIndex);
+	}
+
 	SizeType targets() const { return pVectors_.size(); }
 
 	SizeType origPvectors() const { return origPvectors_; }

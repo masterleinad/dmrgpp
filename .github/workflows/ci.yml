@@ -90,7 +90,7 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
 
     - name: Test
-      run: ctest --test-dir ${{github.workspace}}/build -C ${{matrix.build_type}} --output-on-failure
+      run: ctest --test-dir ${{github.workspace}}/build -C ${{matrix.build_type}} -LE Nightly --output-on-failure
 
     - name: Install
       run: cmake --install ${{github.workspace}}/build --prefix ${{github.workspace}}/install --config ${{matrix.build_type}}

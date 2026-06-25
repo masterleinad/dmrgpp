@@ -1,0 +1,41 @@
+##Ainur1.0
+
+FicticiousBeta=50;
+ChemicalPotential=.0;
+
+Matsubaras=6;
+LatticeGf="energy,semicircular,4";
+NumberOfBathPoints=3;
+DmftNumberOfIterations=1;
+DmftTolerance=0.001;
+ImpuritySolver="dmrg";
+
+MinParamsDelta=0.01;
+MinParamsMaxIter=10000;
+MinParamsDelta2=0.01;
+MinParamsTolerance=1e-4;
+MinParamsVerbose=0;
+
+int ImpuritySite=0;
+real HubbardU=8.0;
+
+SolverOptions=doNotCheckDmEigs;
+RootOutputname="MyCincuentaDmrg3Bath";
+InfiniteLoopKeptStates=20;
+matrix FiniteLoopsGs=[[@auto, 20, 0],[@auto, 20, 0]];
+matrix FiniteLoopsOmega=[[@auto, 20, 2],[@auto, 20, 2]];
+
+TargetElectronsUp=2;
+TargetElectronsDown=2;
+
+real OmegaBegin=-6.;
+integer OmegaTotal=3;
+real OmegaStep=4.0;
+real OmegaDelta=0.1;
+
+integer TridiagSteps=100;
+real TridiagEps=1e-9;
+TruncationTolerance="1e-10,100";
+
+CorrectionVectorEta=0.;
+GsWeight=0.1;
