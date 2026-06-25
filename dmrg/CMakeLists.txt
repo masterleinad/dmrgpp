@@ -22,7 +22,6 @@ add_executable(dmrg ${instantiationFileList} dmrg.cpp)
 if(USE_KOKKOS)
   # Ensure kokkos_gemm is compiled into the main executable so its dgemm_/zgemm_ override
   # is available at runtime (prevents dynamic BLAS libraries from interposing)
-  target_sources(dmrg PRIVATE ${CMAKE_SOURCE_DIR}/PsimagLite/src/kokkos_gemm.cpp)
   target_compile_definitions(dmrg PRIVATE ENABLE_KOKKOS_GEMM)
   target_link_libraries(dmrg Kokkos::kokkoskernels Kokkos::kokkos)
 endif()

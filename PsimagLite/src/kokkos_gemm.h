@@ -14,6 +14,7 @@
 // defined by the including header.
 
 // Double precision
+template <typename IntegerForBlasType>
 inline void kokkos_gemm(char transa,
                         char transb,
                         IntegerForBlasType m,
@@ -84,6 +85,7 @@ inline void kokkos_gemm(char transa,
 }
 
 // Complex double
+template <typename IntegerForBlasType>
 inline void kokkos_gemm(char transa,
                         char transb,
                         IntegerForBlasType m,
@@ -184,6 +186,7 @@ inline void kokkos_gemm(char transa,
 }
 
 // Float and complex-float fallbacks (simple CPU implementations)
+template <typename IntegerForBlasType>
 inline void kokkos_gemm(char transa,
                         char transb,
                         IntegerForBlasType m,
@@ -209,6 +212,7 @@ inline void kokkos_gemm(char transa,
         }
 }
 
+template <typename IntegerForBlasType>
 inline void kokkos_gemm(char transa,
                         char transb,
                         IntegerForBlasType m,

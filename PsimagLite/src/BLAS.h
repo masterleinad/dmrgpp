@@ -9,7 +9,14 @@
 #ifndef PSIMAG_BLAS
 #define PSIMAG_BLAS
 #include "AllocatorCpu.h"
+
+#ifdef USE_KOKKOS
+#include <kokkos_gemm.h>
+#endif
+
 #include <complex>
+
+
 
 /** \file BLAS.h
  *  \author Thomas C. Schulthess and Richard N. Thigpen
@@ -1249,67 +1256,6 @@ namespace BLAS {
 	}
 
 	// ============================================================================
-	/* When using Kokkos-backed GEMM provide C++ kokkos_gemm overloads
-	   and call them instead of the Fortran-style C symbols. */
-	#ifdef ENABLE_KOKKOS_GEMM
-	// Prototypes for kokkos_gemm overloads
-	extern void kokkos_gemm(char,
-	                        char,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        const float&,
-	                        const float*,
-	                        IntegerForBlasType,
-	                        const float*,
-	                        IntegerForBlasType,
-	                        const float&,
-	                        float*,
-	                        IntegerForBlasType);
-
-	extern void kokkos_gemm(char,
-	                        char,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        const double&,
-	                        const double*,
-	                        IntegerForBlasType,
-	                        const double*,
-	                        IntegerForBlasType,
-	                        const double&,
-	                        double*,
-	                        IntegerForBlasType);
-
-	extern void kokkos_gemm(char,
-	                        char,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        const std::complex<float>&,
-	                        const std::complex<float>*,
-	                        IntegerForBlasType,
-	                        const std::complex<float>*,
-	                        IntegerForBlasType,
-	                        const std::complex<float>&,
-	                        std::complex<float>*,
-	                        IntegerForBlasType);
-
-	extern void kokkos_gemm(char,
-	                        char,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        IntegerForBlasType,
-	                        const std::complex<double>&,
-	                        const std::complex<double>*,
-	                        IntegerForBlasType,
-	                        const std::complex<double>*,
-	                        IntegerForBlasType,
-	                        const std::complex<double>&,
-	                        std::complex<double>*,
-	                        IntegerForBlasType);
-	#endif
-
 	inline void GEMM(char               c1,
 	                 char               c2,
 	                 IntegerForBlasType sX,
