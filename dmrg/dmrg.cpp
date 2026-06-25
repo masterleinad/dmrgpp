@@ -127,7 +127,7 @@ to the main dmrg driver are the following.
 	PsimagLite::InputNg<InputCheck>::Writeable::readFile(data, filename);
 
 #ifdef USE_KOKKOS
-	Kokkos::ScopeGuard kokkos_scope_guard(argc, argv);
+	//Kokkos::ScopeGuard kokkos_scope_guard(argc, argv);
 #endif
 	DmrgRunner<double> dmrg_runner(application, data, cmdline_options);
 

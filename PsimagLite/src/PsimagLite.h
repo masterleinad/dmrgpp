@@ -8,6 +8,9 @@
 #include "Random48.h"
 #include "TypeToString.h"
 #include "Vector.h"
+
+#include <Kokkos_Core.hpp>
+
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -70,6 +73,7 @@ public:
 	    : concurrency_(argc, argv, nthreads)
 	    , appName_(basename(appName))
 	    , microArch_(MicroArchitecture().vendorId())
+      , scopeGuard_(*argc, *argv)
 	{
 		chekSizeType();
 
@@ -133,6 +137,7 @@ private:
 	String      appName_;
 	String      cmdLine_;
 	String      microArch_;
+  Kokkos::ScopeGuard scopeGuard_;
 };
 
 } // namespace PsimagLite

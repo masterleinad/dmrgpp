@@ -38,7 +38,7 @@ struct ToolOptions {
 
 template <typename ComplexOrRealType>
 void main1(InputNgType::Readable&          io,
-           PsimagLite::PsiApp              application,
+           PsimagLite::PsiApp&              application,
            const ParametersDmrgSolverType& dmrgSolverParams,
            const ToolOptions&              toolOptions)
 {

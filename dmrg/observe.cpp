@@ -133,7 +133,7 @@ Threads=number
   */
 int main(int argc, char** argv)
 {
-	Kokkos::ScopeGuard scope_guard(argc, argv);
+	//Kokkos::ScopeGuard scope_guard(argc, argv);
 	using namespace Dmrg;
 	PsimagLite::PsiApp application("DMRG++::observe", &argc, &argv, 1);
 	std::string        filename;
