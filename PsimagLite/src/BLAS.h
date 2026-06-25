@@ -1249,6 +1249,67 @@ namespace BLAS {
 	}
 
 	// ============================================================================
+	/* When using Kokkos-backed GEMM provide C++ kokkos_gemm overloads
+	   and call them instead of the Fortran-style C symbols. */
+	#ifdef ENABLE_KOKKOS_GEMM
+	// Prototypes for kokkos_gemm overloads
+	extern void kokkos_gemm(char,
+	                        char,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        const float&,
+	                        const float*,
+	                        IntegerForBlasType,
+	                        const float*,
+	                        IntegerForBlasType,
+	                        const float&,
+	                        float*,
+	                        IntegerForBlasType);
+
+	extern void kokkos_gemm(char,
+	                        char,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        const double&,
+	                        const double*,
+	                        IntegerForBlasType,
+	                        const double*,
+	                        IntegerForBlasType,
+	                        const double&,
+	                        double*,
+	                        IntegerForBlasType);
+
+	extern void kokkos_gemm(char,
+	                        char,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        const std::complex<float>&,
+	                        const std::complex<float>*,
+	                        IntegerForBlasType,
+	                        const std::complex<float>*,
+	                        IntegerForBlasType,
+	                        const std::complex<float>&,
+	                        std::complex<float>*,
+	                        IntegerForBlasType);
+
+	extern void kokkos_gemm(char,
+	                        char,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        IntegerForBlasType,
+	                        const std::complex<double>&,
+	                        const std::complex<double>*,
+	                        IntegerForBlasType,
+	                        const std::complex<double>*,
+	                        IntegerForBlasType,
+	                        const std::complex<double>&,
+	                        std::complex<double>*,
+	                        IntegerForBlasType);
+	#endif
+
 	inline void GEMM(char               c1,
 	                 char               c2,
 	                 IntegerForBlasType sX,
@@ -1263,7 +1324,11 @@ namespace BLAS {
 	                 float*             z,
 	                 IntegerForBlasType sz)
 	{
+	#ifdef ENABLE_KOKKOS_GEMM
+		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
+	#else
 		sgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
+	#endif
 	}
 
 	inline void GEMM(char               c1,
@@ -1280,7 +1345,11 @@ namespace BLAS {
 	                 double*            z,
 	                 IntegerForBlasType sz)
 	{
+	#ifdef ENABLE_KOKKOS_GEMM
+		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
+	#else
 		dgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
+	#endif
 	}
 
 	inline void GEMM(char                       c1,
@@ -1297,7 +1366,11 @@ namespace BLAS {
 	                 std::complex<float>*       z,
 	                 IntegerForBlasType         sz)
 	{
+	#ifdef ENABLE_KOKKOS_GEMM
+		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
+	#else
 		cgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
+	#endif
 	}
 
 	inline void GEMM(char                        c1,
@@ -1328,7 +1401,11 @@ namespace BLAS {
 			}
 		}
 
+	#ifdef ENABLE_KOKKOS_GEMM
+		kokkos_gemm(c1, c2, sX, sY, sZ, a, x, sx, y, sy, b, z, sz);
+	#else
 		zgemm_(&c1, &c2, &sX, &sY, &sZ, &a, x, &sx, y, &sy, &b, z, &sz);
+	#endif
 	}
 
 	// ***************************************************************************

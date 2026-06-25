@@ -314,7 +314,7 @@ private:
 				// Factor added in the input file for this geometry term
 				const std::string& geometry_factor = hamAbstract_.superGeometry()
 				                                         .geometry()
-				                                         .term(termIndex)
+				                                         .term(termIndexForGeom)
 				                                         .factor();
 
 				// default_value = 1.0, that is, if factor is not present

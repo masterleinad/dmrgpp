@@ -1,27 +1,32 @@
+#ifndef PSIMAG_KOKKOS_GEMM_H
+#define PSIMAG_KOKKOS_GEMM_H
+
 #ifdef ENABLE_KOKKOS_GEMM
+
 #include <Kokkos_Core.hpp>
 #include <KokkosBlas3_gemm.hpp>
 #include <complex>
-#include "BLAS.h"
 #include <stdexcept>
 
-namespace psimag {
-namespace BLAS {
+// This header is intended to be included inside namespace psimag::BLAS
+// It provides inline kokkos_gemm overloads that mirror the GEMM
+// signatures used by BLAS.h. IntegerForBlasType is expected to be
+// defined by the including header.
 
 // Double precision
-void kokkos_gemm(char transa,
-                 char transb,
-                 IntegerForBlasType m,
-                 IntegerForBlasType n,
-                 IntegerForBlasType k,
-                 const double& alpha,
-                 const double* A,
-                 IntegerForBlasType lda,
-                 const double* B,
-                 IntegerForBlasType ldb,
-                 const double& beta,
-                 double* C,
-                 IntegerForBlasType ldc)
+inline void kokkos_gemm(char transa,
+                        char transb,
+                        IntegerForBlasType m,
+                        IntegerForBlasType n,
+                        IntegerForBlasType k,
+                        const double& alpha,
+                        const double* A,
+                        IntegerForBlasType lda,
+                        const double* B,
+                        IntegerForBlasType ldb,
+                        const double& beta,
+                        double* C,
+                        IntegerForBlasType ldc)
 {
     int M = static_cast<int>(m);
     int N = static_cast<int>(n);
@@ -79,19 +84,19 @@ void kokkos_gemm(char transa,
 }
 
 // Complex double
-void kokkos_gemm(char transa,
-                 char transb,
-                 IntegerForBlasType m,
-                 IntegerForBlasType n,
-                 IntegerForBlasType k,
-                 const std::complex<double>& alpha,
-                 const std::complex<double>* A,
-                 IntegerForBlasType lda,
-                 const std::complex<double>* B,
-                 IntegerForBlasType ldb,
-                 const std::complex<double>& beta,
-                 std::complex<double>* C,
-                 IntegerForBlasType ldc)
+inline void kokkos_gemm(char transa,
+                        char transb,
+                        IntegerForBlasType m,
+                        IntegerForBlasType n,
+                        IntegerForBlasType k,
+                        const std::complex<double>& alpha,
+                        const std::complex<double>* A,
+                        IntegerForBlasType lda,
+                        const std::complex<double>* B,
+                        IntegerForBlasType ldb,
+                        const std::complex<double>& beta,
+                        std::complex<double>* C,
+                        IntegerForBlasType ldc)
 {
     int M = static_cast<int>(m);
     int N = static_cast<int>(n);
@@ -179,19 +184,19 @@ void kokkos_gemm(char transa,
 }
 
 // Float and complex-float fallbacks (simple CPU implementations)
-void kokkos_gemm(char transa,
-                 char transb,
-                 IntegerForBlasType m,
-                 IntegerForBlasType n,
-                 IntegerForBlasType k,
-                 const float& alpha,
-                 const float* A,
-                 IntegerForBlasType lda,
-                 const float* B,
-                 IntegerForBlasType ldb,
-                 const float& beta,
-                 float* C,
-                 IntegerForBlasType ldc)
+inline void kokkos_gemm(char transa,
+                        char transb,
+                        IntegerForBlasType m,
+                        IntegerForBlasType n,
+                        IntegerForBlasType k,
+                        const float& alpha,
+                        const float* A,
+                        IntegerForBlasType lda,
+                        const float* B,
+                        IntegerForBlasType ldb,
+                        const float& beta,
+                        float* C,
+                        IntegerForBlasType ldc)
 {
     int M = static_cast<int>(m), N = static_cast<int>(n), K = static_cast<int>(k);
     int ldaVal = static_cast<int>(lda), ldbVal = static_cast<int>(ldb), ldcVal = static_cast<int>(ldc);
@@ -204,19 +209,19 @@ void kokkos_gemm(char transa,
         }
 }
 
-void kokkos_gemm(char transa,
-                 char transb,
-                 IntegerForBlasType m,
-                 IntegerForBlasType n,
-                 IntegerForBlasType k,
-                 const std::complex<float>& alpha,
-                 const std::complex<float>* A,
-                 IntegerForBlasType lda,
-                 const std::complex<float>* B,
-                 IntegerForBlasType ldb,
-                 const std::complex<float>& beta,
-                 std::complex<float>* C,
-                 IntegerForBlasType ldc)
+inline void kokkos_gemm(char transa,
+                        char transb,
+                        IntegerForBlasType m,
+                        IntegerForBlasType n,
+                        IntegerForBlasType k,
+                        const std::complex<float>& alpha,
+                        const std::complex<float>* A,
+                        IntegerForBlasType lda,
+                        const std::complex<float>* B,
+                        IntegerForBlasType ldb,
+                        const std::complex<float>& beta,
+                        std::complex<float>* C,
+                        IntegerForBlasType ldc)
 {
     int M = static_cast<int>(m), N = static_cast<int>(n), K = static_cast<int>(k);
     int ldaVal = static_cast<int>(lda), ldbVal = static_cast<int>(ldb), ldcVal = static_cast<int>(ldc);
@@ -229,7 +234,6 @@ void kokkos_gemm(char transa,
         }
 }
 
-} // namespace BLAS
-} // namespace psimag
-
 #endif // ENABLE_KOKKOS_GEMM
+
+#endif // PSIMAG_KOKKOS_GEMM_H

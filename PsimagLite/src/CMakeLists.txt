@@ -18,7 +18,6 @@ add_library(
 
 # If Kokkos support is enabled, compile in the Kokkos-based GEMM wrapper
 if(USE_KOKKOS)
-  target_sources(psimaglite PRIVATE kokkos_gemm.cpp)
   target_include_directories(psimaglite PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   # Enable the compile-time guard inside kokkos_gemm.cpp
   target_compile_definitions(psimaglite PRIVATE ENABLE_KOKKOS_GEMM)
