@@ -1,6 +1,8 @@
 #include "ObserveDriver.h"
 #include "RedirectOutput.hh"
 
+#include <Kokkos_Core.hpp>
+
 using namespace Dmrg;
 
 template <typename T> bool atLeastOneLoopWithBit0Set(const T& fl)
@@ -131,6 +133,7 @@ Threads=number
   */
 int main(int argc, char** argv)
 {
+	Kokkos::ScopeGuard scope_guard(argc, argv);
 	using namespace Dmrg;
 	PsimagLite::PsiApp application("DMRG++::observe", &argc, &argv, 1);
 	std::string        filename;

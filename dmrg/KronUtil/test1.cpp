@@ -1,5 +1,6 @@
 #include "KronUtil.h"
 #include "util.h"
+#include <Kokkos_Core.hpp>
 
 #ifndef USE_FLOAT
 using RealType = double;
@@ -9,6 +10,8 @@ using RealType = float;
 
 int main()
 {
+  Kokkos::ScopeGuard scope_guard;
+
 	const RealType denseFlopDiscount = 0.2;
 	const int      idebug            = 0;
 	int            nerrors           = 0;
