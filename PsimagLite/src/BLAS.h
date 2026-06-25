@@ -17,8 +17,6 @@
 
 #include <complex>
 
-
-
 /** \file BLAS.h
  *  \author Thomas C. Schulthess and Richard N. Thigpen
  */
