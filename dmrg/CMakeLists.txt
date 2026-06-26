@@ -19,11 +19,6 @@ target_link_libraries(dmrg_runner PUBLIC dmrgpp_utils kronutil)
 
 # Dmrg executable (main executable)
 add_executable(dmrg ${instantiationFileList} dmrg.cpp)
-if(USE_KOKKOS)
-  # Ensure kokkos_gemm is compiled into the main executable so its dgemm_/zgemm_ override
-  # is available at runtime (prevents dynamic BLAS libraries from interposing)
-  target_link_libraries(dmrg Kokkos::kokkoskernels Kokkos::kokkos)
-endif()
 target_link_libraries(dmrg dmrg_runner)
 target_include_directories(dmrg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 

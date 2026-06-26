@@ -23,12 +23,6 @@
 #include "magma_v2.h"
 #endif
 
-#ifdef USE_KOKKOS
-#include <Kokkos_Core.hpp>
-#else
-#error "Kokkos should be here"
-#endif
-
 /*
  ---------------------------------------
  simple program to test vbatch
@@ -37,7 +31,6 @@
 
 IntegerType main(IntegerType argc, char* argv[])
 {
-	Kokkos::ScopeGuard scope_guard(argc, argv);
 	const IntegerType ialign          = 32;
 	const IntegerType idebug          = 1;
 	SizeType          noperator       = 2;

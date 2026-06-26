@@ -16,15 +16,10 @@ add_library(
   Ainur/AinurSpirit.cpp
   Ainur/AinurConvert.cpp)
 
-# Generate configuration header for PsimagLite
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/psimaglite_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/psimaglite_config.h @ONLY)
-# Ensure consumers can include generated header
-target_include_directories(psimaglite PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
-
 # If Kokkos support is enabled, compile in the Kokkos-based GEMM wrapper
+option(USE_KOKKOS "Enable Kokkos support" OFF)
 if(USE_KOKKOS)
-  #target_include_directories(psimaglite PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-  # Link against Kokkos and KokkosKernels targets
+  find_package(KokkosKernels 5.1 REQUIRED)
   target_link_libraries(psimaglite PUBLIC Kokkos::kokkoskernels Kokkos::kokkos)
 endif()
 target_include_directories(psimaglite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/Io
@@ -32,6 +27,11 @@ target_include_directories(psimaglite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE
 
 target_compile_features(psimaglite PUBLIC cxx_std_17)
 target_link_libraries(psimaglite PUBLIC loki)
+
+# Generate configuration header for PsimagLite
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/psimaglite_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/psimaglite_config.h @ONLY)
+# Ensure consumers can include generated header
+target_include_directories(psimaglite PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 add_library(psimaglite::psimaglite ALIAS psimaglite)
 

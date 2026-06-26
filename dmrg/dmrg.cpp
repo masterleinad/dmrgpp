@@ -4,9 +4,6 @@
 #include "DmrgRunner.h"
 #include "Io/IoNg.h"
 #include "Provenance.h"
-#ifdef USE_KOKKOS
-#include <Kokkos_Core.hpp>
-#endif
 
 typedef PsimagLite::Vector<PsimagLite::String>::Type VectorStringType;
 
@@ -126,9 +123,6 @@ to the main dmrg driver are the following.
 	PsimagLite::String data;
 	PsimagLite::InputNg<InputCheck>::Writeable::readFile(data, filename);
 
-#ifdef USE_KOKKOS
-	//Kokkos::ScopeGuard kokkos_scope_guard(argc, argv);
-#endif
 	DmrgRunner<double> dmrg_runner(application, data, cmdline_options);
 
 	dmrg_runner.doOneRun();
