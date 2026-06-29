@@ -57,68 +57,10 @@ inline void kokkos_gemm(char transa,
 Kokkos::DefaultExecutionSpace exec;
 decltype(exec)::memory_space mem;
 
-        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Aview_op(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Aview"), M, K);
-{
-   Kokkos::Profiling::ScopedRegion scoped_region("initialize_a");
- 
-       if (ta == 'N') {
-            Kokkos::deep_copy(Aview_op, Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace>(reinterpret_cast<const KokkosScalar*>(A), M, K));
- /*           for (int i = 0; i < M; ++i)
-                for (int kk = 0; kk < K; ++kk) {
-                    auto val = A[i + kk * ldaVal];
-                    Aview_op(i, kk) = val;
-                }*/
-        } else if (ta == 'T') {
-            for (int i = 0; i < M; ++i)
-                for (int kk = 0; kk < K; ++kk) {
-                    auto val = A[kk + i * ldaVal];
-                    Aview_op(i, kk) = val;
-                }
-        } else {
-            KOKKOS_ASSERT(ta == 'C');
-            for (int i = 0; i < M; ++i)
-                for (int kk = 0; kk < K; ++kk) {
-                    auto val = A[kk + i * ldaVal];
-                    if constexpr(!std::is_floating_point_v<Scalar>) {
-                      auto conjv = std::conj(val);
-                      Aview_op(i, kk) = conjv;
-                    } else {
-                      Aview_op(i, kk) = val;
-                    }
-                }
-        }
-}
+Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Aview_op(reinterpret_cast<const KokkosScalar*>(A), M, K);
         auto Aview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Aview_op);
 
-        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Bview_op(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Bview"), K, N);
-{
-   Kokkos::Profiling::ScopedRegion scoped_region("initialize_b");
-        if (tb == 'N') {
-            for (int kk = 0; kk < K; ++kk)
-                for (int j = 0; j < N; ++j) {
-                    auto val = B[kk + j * ldbVal];
-                    Bview_op(kk, j) = val;
-                }
-        } else if (tb == 'T') {
-            for (int kk = 0; kk < K; ++kk)
-                for (int j = 0; j < N; ++j) {
-                    auto val = B[j + kk * ldbVal];
-                    Bview_op(kk, j) = val;
-                }
-        } else {
-            KOKKOS_ASSERT(ta == 'C');
-            for (int kk = 0; kk < K; ++kk)
-                for (int j = 0; j < N; ++j) {
-                    auto val = B[j + kk * ldbVal];
-                    if constexpr(!std::is_floating_point_v<Scalar>) {
-                      auto conjv = std::conj(val);
-                      Bview_op(kk, j) = conjv;
-                    } else {
-                      Bview_op(kk, j) = val;
-                    }
-                }
-        }
-}
+        Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Bview_op(reinterpret_cast<const KokkosScalar*>(B), K, N);
         auto Bview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Bview_op);
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Cview(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Cview"), M, N);
@@ -132,8 +74,9 @@ Kokkos::Profiling::ScopedRegion scoped_region("initialize_c");
 }
         auto Cview_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Cview);
 
-        const char transNN[2] = {'N', '\0'};
-        KokkosBlas::gemm(exec, transNN, transNN, alpha, Aview_op_device, Bview_op_device, beta, Cview_device);
+        const char transA[2] = {ta, '\0'};
+        const char transB[2] = {tb, '\0'};
+        KokkosBlas::gemm(exec, transA, transB, alpha, Aview_op_device, Bview_op_device, beta, Cview_device);
         Kokkos::deep_copy(exec, Cview, Cview_device);
         exec.fence();
 
