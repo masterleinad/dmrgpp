@@ -57,10 +57,10 @@ inline void kokkos_gemm(char transa,
 Kokkos::DefaultExecutionSpace exec;
 decltype(exec)::memory_space mem;
 
-Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Aview_op(reinterpret_cast<const KokkosScalar*>(A), M, K);
+Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Aview_op(reinterpret_cast<const KokkosScalar*>(A), ta=='N'?M:K, ta=='N'?K:M);
         auto Aview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Aview_op);
 
-        Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Bview_op(reinterpret_cast<const KokkosScalar*>(B), K, N);
+        Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Bview_op(reinterpret_cast<const KokkosScalar*>(B), tb=='N'?K:N, tb=='N'?N:K);
         auto Bview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Bview_op);
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Cview(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Cview"), M, N);
