@@ -57,21 +57,15 @@ inline void kokkos_gemm(char transa,
 Kokkos::DefaultExecutionSpace exec;
 decltype(exec)::memory_space mem;
 
-Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Aview_op(reinterpret_cast<const KokkosScalar*>(A), ta=='N'?M:K, ta=='N'?K:M);
+KOKKOS_ASSERT(ldaVal == (ta=='N'?M:K));
+        Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Aview_op(reinterpret_cast<const KokkosScalar*>(A), ta=='N'?M:K, ta=='N'?K:M);
         auto Aview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Aview_op);
 
+KOKKOS_ASSERT(ldbVal == (tb=='N'?K:N));
         Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Bview_op(reinterpret_cast<const KokkosScalar*>(B), tb=='N'?K:N, tb=='N'?N:K);
         auto Bview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Bview_op);
 
-        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Cview(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Cview"), M, N);
-{   
-Kokkos::Profiling::ScopedRegion scoped_region("initialize_c");
-        for (int i = 0; i < M; ++i)
-            for (int j = 0; j < N; ++j) {
-                auto val = C[i + j * ldcVal];
-                Cview(i, j) = val;
-            }
-}
+        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> Cview(reinterpret_cast<KokkosScalar*>(C), M, N);
         auto Cview_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Cview);
 
         const char transA[2] = {ta, '\0'};
@@ -79,11 +73,6 @@ Kokkos::Profiling::ScopedRegion scoped_region("initialize_c");
         KokkosBlas::gemm(exec, transA, transB, alpha, Aview_op_device, Bview_op_device, beta, Cview_device);
         Kokkos::deep_copy(exec, Cview, Cview_device);
         exec.fence();
-
-        for (int i = 0; i < M; ++i)
-            for (int j = 0; j < N; ++j)
-                C[i + j * ldcVal] = Cview(i, j);
-
 }
 
 #define PSIMAGLITE_INSTANTIATE_KOKKOS_GEMM(SCALAR, INTEGER) \
