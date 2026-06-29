@@ -55,8 +55,8 @@ inline void kokkos_gemm(char transa,
     // Determine Kokkos scalar type
         using KokkosScalar = KokkosType<Scalar>::type;
 
-Kokkos::Serial exec;
-Kokkos::HostSpace mem;
+Kokkos::DefaultExecutionSpace exec;
+decltype(exec)::memory_space mem;
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Aview_op("Aview", M, K);
         if (ta == 'N') {
