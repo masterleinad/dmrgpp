@@ -55,10 +55,7 @@ inline void kokkos_gemm(char transa,
     // Determine Kokkos scalar type
         using KokkosScalar = KokkosType<Scalar>::type;
 
-Kokkos::DefaultExecutionSpace exec;
-Kokkos::DefaultExecutionSpace::memory_space mem;
-
-        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Aview_op("Aview", M, K);
+        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Aview_op("Aview_z", M, K);
         if (ta == 'N') {
             for (int i = 0; i < M; ++i)
                 for (int kk = 0; kk < K; ++kk) {
@@ -84,9 +81,8 @@ Kokkos::DefaultExecutionSpace::memory_space mem;
                     }
                 }
         }
-        auto Aview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Aview_op);
 
-        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Bview_op("Bview", K, N);
+        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Bview_op("Bview_z", K, N);
         if (tb == 'N') {
             for (int kk = 0; kk < K; ++kk)
                 for (int j = 0; j < N; ++j) {
@@ -112,15 +108,19 @@ Kokkos::DefaultExecutionSpace::memory_space mem;
                     }
                 }
         }
-        auto Bview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Bview_op);
 
-        Kokkos::View<KokkosScalar**> Cview_device("Cview", M, N);
+        Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Cview("Cview_z", M, N);
+        for (int i = 0; i < M; ++i)
+            for (int j = 0; j < N; ++j) {
+                auto val = C[i + j * ldcVal];
+                Cview(i, j) = val;
+            }
 
+        //KokkosScalar alphaC(std::real(alpha), std::imag(alpha));
+        //KokkosScalar betaC(std::real(beta), std::imag(beta));
         const char transNN[2] = {'N', '\0'};
-        KokkosBlas::gemm(exec, transNN, transNN, alpha, Aview_op_device, Bview_op_device, beta, Cview_device);
-        auto Cview = Kokkos::create_mirror_view(Kokkos::HostSpace{}, Cview_device);
-        Kokkos::deep_copy(exec, Cview, Cview_device);
-        exec.fence();
+        KokkosBlas::gemm(transNN, transNN, alpha, Aview_op, Bview_op, beta, Cview);
+        Kokkos::fence();
 
         for (int i = 0; i < M; ++i)
             for (int j = 0; j < N; ++j)
