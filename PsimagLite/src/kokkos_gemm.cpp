@@ -58,11 +58,16 @@ Kokkos::DefaultExecutionSpace exec;
 decltype(exec)::memory_space mem;
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Aview_op(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Aview"), M, K);
-        if (ta == 'N') {
-            for (int i = 0; i < M; ++i)
+{
+   Kokkos::Profiling::ScopedRegion scoped_region("initialize_a");
+ 
+       if (ta == 'N') {
+            Kokkos::deep_copy(Aview_op, Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace>(A, M, K);
+ /*           for (int i = 0; i < M; ++i)
                 for (int kk = 0; kk < K; ++kk) {
                     auto val = A[i + kk * ldaVal];
                     Aview_op(i, kk) = val;
+*/
                 }
         } else if (ta == 'T') {
             for (int i = 0; i < M; ++i)
@@ -83,9 +88,12 @@ decltype(exec)::memory_space mem;
                     }
                 }
         }
+}
         auto Aview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Aview_op);
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Bview_op(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Bview"), K, N);
+{
+   Kokkos::Profiling::ScopedRegion scoped_region("initialize_b");
         if (tb == 'N') {
             for (int kk = 0; kk < K; ++kk)
                 for (int j = 0; j < N; ++j) {
@@ -111,16 +119,19 @@ decltype(exec)::memory_space mem;
                     }
                 }
         }
+}
         auto Bview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Bview_op);
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Cview(Kokkos::view_alloc(Kokkos::WithoutInitializing, "Cview"), M, N);
+{   
+Kokkos::Profiling::ScopedRegion scoped_region("initialize_c");
         for (int i = 0; i < M; ++i)
             for (int j = 0; j < N; ++j) {
                 auto val = C[i + j * ldcVal];
                 Cview(i, j) = val;
             }
+}
         auto Cview_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Cview);
-
 
         const char transNN[2] = {'N', '\0'};
         KokkosBlas::gemm(exec, transNN, transNN, alpha, Aview_op_device, Bview_op_device, beta, Cview_device);
