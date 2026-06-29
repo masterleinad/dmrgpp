@@ -115,16 +115,14 @@ Kokkos::HostSpace mem;
         auto Bview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Bview_op);
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Cview("Cview", M, N);
-/*        for (int i = 0; i < M; ++i)
+        for (int i = 0; i < M; ++i)
             for (int j = 0; j < N; ++j) {
                 auto val = C[i + j * ldcVal];
                 Cview(i, j) = val;
-            }*/
-        auto Cview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Cview_op);
+            }
+        auto Cview_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Cview);
 
 
-        //KokkosScalar alphaC(std::real(alpha), std::imag(alpha));
-        //KokkosScalar betaC(std::real(beta), std::imag(beta));
         const char transNN[2] = {'N', '\0'};
         KokkosBlas::gemm(exec, transNN, transNN, alpha, Aview_op_device, Bview_op_device, beta, Cview_device);
         Kokkos::deep_copy(exec, Cview, Cview_device);
