@@ -55,8 +55,8 @@ inline void kokkos_gemm(char transa,
     // Determine Kokkos scalar type
         using KokkosScalar = KokkosType<Scalar>::type;
 
-Kokkos::Serial exec;
-Kokkos::HostSpace mem;
+Kokkos::DefaultExecutionSpace exec;
+Kokkos::DefaultExecutionSpace::memory_space mem;
 
         Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace> Aview_op("Aview", M, K);
         if (ta == 'N') {
@@ -114,7 +114,7 @@ Kokkos::HostSpace mem;
         }
         auto Bview_op_device = Kokkos::create_mirror_view_and_copy(Kokkos::view_alloc(exec, mem), Bview_op);
 
-        Kokkos::View<KokkosScalar**, decltype(mem)> Cview_device("Cview", M, N);
+        Kokkos::View<KokkosScalar**> Cview_device("Cview", M, N);
 
         const char transNN[2] = {'N', '\0'};
         KokkosBlas::gemm(exec, transNN, transNN, alpha, Aview_op_device, Bview_op_device, beta, Cview_device);
