@@ -62,13 +62,12 @@ decltype(exec)::memory_space mem;
    Kokkos::Profiling::ScopedRegion scoped_region("initialize_a");
  
        if (ta == 'N') {
-            Kokkos::deep_copy(Aview_op, Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace>(A, M, K);
+            Kokkos::deep_copy(Aview_op, Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace>(reinterpret_cast<const KokkosScalar*>(A), M, K));
  /*           for (int i = 0; i < M; ++i)
                 for (int kk = 0; kk < K; ++kk) {
                     auto val = A[i + kk * ldaVal];
                     Aview_op(i, kk) = val;
-*/
-                }
+                }*/
         } else if (ta == 'T') {
             for (int i = 0; i < M; ++i)
                 for (int kk = 0; kk < K; ++kk) {
