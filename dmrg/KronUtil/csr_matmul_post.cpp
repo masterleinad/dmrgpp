@@ -2,8 +2,9 @@
 #ifdef USE_KOKKOS
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Complex.hpp>
-#include <KokkosSparse_CrsMatrix.hpp>
-#include <KokkosSparse_spmv.hpp>
+#include <KokkosKernels_ArithTraits.hpp>
+#include <KokkosBatched_Spmv.hpp>
+#include <KokkosBatched_CrsMatrix.hpp>
 #include <vector>
 #include <type_traits>
 
@@ -48,9 +49,9 @@ void csr_matmul_post(char                                                       
 	int        isConj          = (trans_A == 'Z') || (trans_A == 'z');
 
 #ifdef USE_KOKKOS
-	// Use KokkosSparse::spmv by transposing operations
-	using HostExec = Kokkos::DefaultExecutionSpace;
-	HostExec exec;
+	// Use KokkosBatched if available, otherwise fallback to KokkosSparse
+	using ExecSpace = Kokkos::DefaultExecutionSpace;
+	ExecSpace exec;
 	using Ordinal = int;
 
 	using KokkosScalar = typename KokkosScalarTypePost<ComplexOrRealType, PsimagLite::IsComplexNumber<ComplexOrRealType>::True>::type;
@@ -75,48 +76,159 @@ void csr_matmul_post(char                                                       
 		}
 	}
 
-	// build CrsMatrix from raw host arrays; constructor will deep-copy to device
-	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, HostExec> A_crs("A_crs", nrow_A, (int)a.cols(), nnz,
-	                                                              vals.data(), rowptr.data(), cols.data());
+	#if defined(__has_include)
+	# if __has_include(<KokkosBatched_CrsMatrix.hpp>)
+		// create host rank-2 values view (batch dim = 1), and host int views
+		using ValuesHostViewType = Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace>;
+		using IntHostViewType = Kokkos::View<int*, Kokkos::HostSpace>;
 
-	// For each column of Y perform spmv
-	for (int iy = 0; iy < nrow_Y; ++iy) {
-		std::vector<KokkosScalar> yhost((size_t)ncol_Y);
-		for (int j = 0; j < ncol_Y; ++j) {
-			if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
-				yhost[j] = yin(iy, j);
-			} else {
-				auto vv = yin(iy, j);
-				if (is_complex && isConj && !(isTranspose || isConjTranspose)) vv = PsimagLite::conj(vv);
-				yhost[j] = Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(), vv.imag());
+		ValuesHostViewType h_values("h_values_p", 1, nnz);
+		for (int k = 0; k < nnz; ++k) h_values(0, k) = vals[k];
+
+		IntHostViewType h_rowptr("h_rowptr_p", nrow_A + 1);
+		for (int i = 0; i <= nrow_A; ++i) h_rowptr(i) = rowptr[i];
+
+		IntHostViewType h_cols("h_cols_p", nnz);
+		for (int k = 0; k < nnz; ++k) h_cols(k) = cols[k];
+
+		// copy to execution space
+		auto d_values = Kokkos::create_mirror_view_and_copy(ExecSpace(), h_values);
+		auto d_rowptr = Kokkos::create_mirror_view_and_copy(ExecSpace(), h_rowptr);
+		auto d_cols = Kokkos::create_mirror_view_and_copy(ExecSpace(), h_cols);
+
+		using ValuesDeviceViewType = decltype(d_values);
+		using IntDeviceViewType = decltype(d_rowptr);
+		KokkosBatched::CrsMatrix<ValuesDeviceViewType, IntDeviceViewType> A_crs(d_values, d_rowptr, d_cols);
+
+		// For each column of Y perform spmv
+		for (int iy = 0; iy < nrow_Y; ++iy) {
+			std::vector<KokkosScalar> yhost((size_t)ncol_Y);
+			for (int j = 0; j < ncol_Y; ++j) {
+				if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+					yhost[j] = yin(iy, j);
+				} else {
+					auto vv = yin(iy, j);
+					if (is_complex && isConj && !(isTranspose || isConjTranspose)) vv = PsimagLite::conj(vv);
+					yhost[j] = Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(), vv.imag());
+				}
 			}
-		}
 
-		auto y_dev = Kokkos::create_mirror_view_and_copy(HostExec(), Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(yhost.data(), ncol_Y));
-		auto x_dev_out = Kokkos::View<KokkosScalar*>("x_dev_out", ncol_X);
+			// Build host/device X/Y as rank-2 (batch dim = 1)
+			using ValuesHostViewType = Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace>;
+			ValuesHostViewType h_X("h_X_p", 1, ncol_Y);
+			for (int j = 0; j < ncol_Y; ++j) h_X(0, j) = yhost[j];
+			ValuesHostViewType h_Y("h_Y_p", 1, ncol_X);
+			for (int j = 0; j < ncol_X; ++j) h_Y(0, j) = KokkosKernels::ArithTraits<KokkosScalar>::zero();
 
-		if (isTranspose || isConjTranspose) {
-			// X += Y * transpose(A)  => operate with At: use spmv with transpose flag per column
-			KokkosSparse::spmv("T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
-		} else {
-			KokkosSparse::spmv("N", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
-		}
+			auto d_X = Kokkos::create_mirror_view_and_copy(ExecSpace(), h_X);
+			auto d_Y = Kokkos::create_mirror_view_and_copy(ExecSpace(), h_Y);
 
-		std::vector<KokkosScalar> xhost((size_t)ncol_X);
-		Kokkos::View<KokkosScalar*, Kokkos::HostSpace> h_xhost(xhost.data(), ncol_X);
-		Kokkos::deep_copy(h_xhost, x_dev_out);
-		exec.fence();
+			using MagType = typename KokkosKernels::ArithTraits<KokkosScalar>::mag_type;
 
-		for (int jx = 0; jx < ncol_X; ++jx) {
-			if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
-				xout(iy, jx) += xhost[jx];
+			if (isTranspose || isConjTranspose) {
+				A_crs.template apply<KokkosBatched::Trans::Transpose>(d_X, d_Y, MagType(1), MagType(0));
 			} else {
-				Kokkos::complex<typename ComplexOrRealType::value_type> c = xhost[jx];
-				xout(iy, jx) += ComplexOrRealType(static_cast<typename ComplexOrRealType::value_type>(c.real()),
+				A_crs.template apply<KokkosBatched::Trans::NoTranspose>(d_X, d_Y, MagType(1), MagType(0));
+			}
+
+			auto h_Y_res = Kokkos::create_mirror_view(d_Y);
+			Kokkos::deep_copy(h_Y_res, d_Y);
+			exec.fence();
+
+			for (int jx = 0; jx < ncol_X; ++jx) {
+				if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+					xout(iy, jx) += h_Y_res(0, jx);
+				} else {
+					Kokkos::complex<typename ComplexOrRealType::value_type> c = h_Y_res(0, jx);
+					xout(iy, jx) += ComplexOrRealType(static_cast<typename ComplexOrRealType::value_type>(c.real()),
 										 static_cast<typename ComplexOrRealType::value_type>(c.imag()));
+				}
 			}
 		}
-	}
+	# else
+		// Fallback: construct KokkosSparse CrsMatrix from raw host arrays and use KokkosSparse::spmv per-column
+		KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, ExecSpace> A_crs("A_crs", nrow_A, (int)a.cols(), nnz,
+		                                                              vals.data(), rowptr.data(), cols.data());
+
+		for (int iy = 0; iy < nrow_Y; ++iy) {
+			std::vector<KokkosScalar> yhost((size_t)ncol_Y);
+			for (int j = 0; j < ncol_Y; ++j) {
+				if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+					yhost[j] = yin(iy, j);
+				} else {
+					auto vv = yin(iy, j);
+					if (is_complex && isConj && !(isTranspose || isConjTranspose)) vv = PsimagLite::conj(vv);
+					yhost[j] = Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(), vv.imag());
+				}
+			}
+
+			auto y_dev = Kokkos::create_mirror_view_and_copy(ExecSpace(), Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(yhost.data(), ncol_Y));
+			auto x_dev_out = Kokkos::View<KokkosScalar*>("x_dev_out", ncol_X);
+
+			if (isTranspose || isConjTranspose) {
+				KokkosSparse::spmv("T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
+			} else {
+				KokkosSparse::spmv("N", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
+			}
+
+			std::vector<KokkosScalar> xhost((size_t)ncol_X);
+			Kokkos::View<KokkosScalar*, Kokkos::HostSpace> h_xhost(xhost.data(), ncol_X);
+			Kokkos::deep_copy(h_xhost, x_dev_out);
+			exec.fence();
+
+			for (int jx = 0; jx < ncol_X; ++jx) {
+				if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+					xout(iy, jx) += xhost[jx];
+				} else {
+					Kokkos::complex<typename ComplexOrRealType::value_type> c = xhost[jx];
+					xout(iy, jx) += ComplexOrRealType(static_cast<typename ComplexOrRealType::value_type>(c.real()),
+										 static_cast<typename ComplexOrRealType::value_type>(c.imag()));
+				}
+			}
+		}
+	# endif
+	#else
+		// No __has_include: fallback to KokkosSparse
+		KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, ExecSpace> A_crs("A_crs", nrow_A, (int)a.cols(), nnz,
+		                                                              vals.data(), rowptr.data(), cols.data());
+
+		for (int iy = 0; iy < nrow_Y; ++iy) {
+			std::vector<KokkosScalar> yhost((size_t)ncol_Y);
+			for (int j = 0; j < ncol_Y; ++j) {
+				if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+					yhost[j] = yin(iy, j);
+				} else {
+					auto vv = yin(iy, j);
+					if (is_complex && isConj && !(isTranspose || isConjTranspose)) vv = PsimagLite::conj(vv);
+					yhost[j] = Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(), vv.imag());
+				}
+			}
+
+			auto y_dev = Kokkos::create_mirror_view_and_copy(ExecSpace(), Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(yhost.data(), ncol_Y));
+			auto x_dev_out = Kokkos::View<KokkosScalar*>("x_dev_out", ncol_X);
+
+			if (isTranspose || isConjTranspose) {
+				KokkosSparse::spmv("T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
+			} else {
+				KokkosSparse::spmv("N", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
+			}
+
+			std::vector<KokkosScalar> xhost((size_t)ncol_X);
+			Kokkos::View<KokkosScalar*, Kokkos::HostSpace> h_xhost(xhost.data(), ncol_X);
+			Kokkos::deep_copy(h_xhost, x_dev_out);
+			exec.fence();
+
+			for (int jx = 0; jx < ncol_X; ++jx) {
+				if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+					xout(iy, jx) += xhost[jx];
+				} else {
+					Kokkos::complex<typename ComplexOrRealType::value_type> c = xhost[jx];
+					xout(iy, jx) += ComplexOrRealType(static_cast<typename ComplexOrRealType::value_type>(c.real()),
+										 static_cast<typename ComplexOrRealType::value_type>(c.imag()));
+				}
+			}
+		}
+	#endif
 
 	return;
 #endif
