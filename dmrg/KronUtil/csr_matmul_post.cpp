@@ -14,6 +14,7 @@ template<typename T>
 struct KokkosScalarTypePost<T, true> { using type = Kokkos::complex<typename T::value_type>; };
 #endif
 
+
 template <typename ComplexOrRealType>
 void csr_matmul_post(char                                                       trans_A,
                      const PsimagLite::CrsMatrix<ComplexOrRealType>&            a,
@@ -70,12 +71,21 @@ void csr_matmul_post(char                                                       
 			vals[k] = a.getValue(k);
 		} else {
 			ComplexOrRealType v = a.getValue(k);
-			if (is_complex && (isConj || isConjTranspose)) v = PsimagLite::conj(v);
 			vals[k] = Kokkos::complex<typename ComplexOrRealType::value_type>(v.real(), v.imag());
 		}
 	}
 
 	// build CrsMatrix from raw host arrays; constructor will deep-copy to device
+	{
+		double maxAbs=0.0;
+		for (int i=0;i<nnz;++i){
+			double v = 0.0;
+			if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) v = std::abs((double)vals[i]);
+			else v = std::abs((double)vals[i].real()) + std::abs((double)vals[i].imag());
+			if (v>maxAbs) maxAbs=v;
+		}
+		(void)maxAbs;
+	}
 	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, HostExec> A_crs("A_crs", nrow_A, (int)a.cols(), nnz,
 	                                                              vals.data(), rowptr.data(), cols.data());
 
@@ -87,7 +97,6 @@ void csr_matmul_post(char                                                       
 				yhost[j] = yin(iy, j);
 			} else {
 				auto vv = yin(iy, j);
-				if (is_complex && isConj && !(isTranspose || isConjTranspose)) vv = PsimagLite::conj(vv);
 				yhost[j] = Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(), vv.imag());
 			}
 		}
@@ -95,11 +104,30 @@ void csr_matmul_post(char                                                       
 		auto y_dev = Kokkos::create_mirror_view_and_copy(HostExec(), Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(yhost.data(), ncol_Y));
 		auto x_dev_out = Kokkos::View<KokkosScalar*>("x_dev_out", ncol_X);
 
+		#ifdef SPMV_DEBUG
+		fprintf(stderr, "csr_matmul_post spmv: A: %d x %d, isTranspose=%d, nrow_Y=%d, ncol_Y=%d, nrow_X=%d, ncol_X=%d\n",
+			 (int)nrow_A, (int)a.cols(), (int)isTranspose, nrow_Y, ncol_Y, nrow_X, ncol_X);
+		fflush(stderr);
 		if (isTranspose || isConjTranspose) {
-			// X += Y * transpose(A)  => operate with At: use spmv with transpose flag per column
-			KokkosSparse::spmv("T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
+			if (!((nrow_X == nrow_Y) && (ncol_Y == (int)a.cols()) && (ncol_X == nrow_A))) {
+				fprintf(stderr, "csr_matmul_post shape mismatch T: A=%d x %d, nrow_Y=%d, ncol_Y=%d, nrow_X=%d, ncol_X=%d\n",
+					 (int)nrow_A, (int)a.cols(), nrow_Y, ncol_Y, nrow_X, ncol_X);
+				fflush(stderr);
+			}
 		} else {
+			if (!((nrow_X == nrow_Y) && (ncol_Y == nrow_A) && (ncol_X == (int)a.cols()))) {
+				fprintf(stderr, "csr_matmul_post shape mismatch N: A=%d x %d, nrow_Y=%d, ncol_Y=%d, nrow_X=%d, ncol_X=%d\n",
+					 (int)nrow_A, (int)a.cols(), nrow_Y, ncol_Y, nrow_X, ncol_X);
+				fflush(stderr);
+			}
+		}
+		#endif
+		if (isTranspose || isConjTranspose) {
+			// op(A) == transpose(A): X += Y * transpose(A) -> use spmv with "N" on A (A * x)
 			KokkosSparse::spmv("N", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
+		} else {
+			// op(A) == A: X += Y * A -> compute (A^T * y^T)^T using spmv with "T"
+			KokkosSparse::spmv("T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
 		}
 
 		std::vector<KokkosScalar> xhost((size_t)ncol_X);
@@ -107,13 +135,15 @@ void csr_matmul_post(char                                                       
 		Kokkos::deep_copy(h_xhost, x_dev_out);
 		exec.fence();
 
+
+		// Simple accumulation of Kokkos result into xout
 		for (int jx = 0; jx < ncol_X; ++jx) {
 			if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
-				xout(iy, jx) += xhost[jx];
+			xout(iy, jx) += xhost[jx];
 			} else {
-				Kokkos::complex<typename ComplexOrRealType::value_type> c = xhost[jx];
-				xout(iy, jx) += ComplexOrRealType(static_cast<typename ComplexOrRealType::value_type>(c.real()),
-										 static_cast<typename ComplexOrRealType::value_type>(c.imag()));
+			Kokkos::complex<typename ComplexOrRealType::value_type> c = xhost[jx];
+			xout(iy, jx) += ComplexOrRealType(static_cast<typename ComplexOrRealType::value_type>(c.real()),
+							 static_cast<typename ComplexOrRealType::value_type>(c.imag()));
 			}
 		}
 	}
@@ -122,6 +152,7 @@ void csr_matmul_post(char                                                       
 #endif
 
 	// fallback host implementation
+
 	if (isTranspose || isConjTranspose) {
 		assert(nrow_X == nrow_Y);
 		assert(static_cast<SizeType>(ncol_Y) == a.cols() && (ncol_X == nrow_A));
