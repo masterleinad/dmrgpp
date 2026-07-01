@@ -92,24 +92,6 @@ void csr_matmul_pre(char                                                       t
 
 	// For each column of Y perform spmv: xcol = op(A) * ycol
 	const char trans = (isTranspose || isConjTranspose) ? 'T' : 'N';
-#ifdef SPMV_DEBUG
-	fprintf(stderr, "csr_matmul_pre spmv: A: %d x %d, trans=%c, nrow_Y=%d, nrow_X=%d, ncol_Y=%d, ncol_X=%d\n",
-		 (int)nrow_A, (int)a.cols(), trans, nrow_Y, nrow_X, ncol_Y, ncol_X);
-	fflush(stderr);
-	if (trans == 'N') {
-		if (!(nrow_X == nrow_A && nrow_Y == (int)a.cols())) {
-			fprintf(stderr, "csr_matmul_pre shape mismatch N: A=%d x %d, nrow_Y=%d, nrow_X=%d\n",
-				 (int)nrow_A, (int)a.cols(), nrow_Y, nrow_X);
-			fflush(stderr);
-		}
-	} else {
-		if (!(nrow_X == (int)a.cols() && nrow_Y == nrow_A)) {
-			fprintf(stderr, "csr_matmul_pre shape mismatch T: A=%d x %d, nrow_Y=%d, nrow_X=%d\n",
-				 (int)nrow_A, (int)a.cols(), nrow_Y, nrow_X);
-			fflush(stderr);
-		}
-	}
-#endif
 #endif
 
 	for (int jy = 0; jy < ncol_Y; ++jy) {

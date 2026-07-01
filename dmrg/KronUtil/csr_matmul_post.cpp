@@ -104,24 +104,6 @@ void csr_matmul_post(char                                                       
 		auto y_dev = Kokkos::create_mirror_view_and_copy(HostExec(), Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(yhost.data(), ncol_Y));
 		auto x_dev_out = Kokkos::View<KokkosScalar*>("x_dev_out", ncol_X);
 
-		#ifdef SPMV_DEBUG
-		fprintf(stderr, "csr_matmul_post spmv: A: %d x %d, isTranspose=%d, nrow_Y=%d, ncol_Y=%d, nrow_X=%d, ncol_X=%d\n",
-			 (int)nrow_A, (int)a.cols(), (int)isTranspose, nrow_Y, ncol_Y, nrow_X, ncol_X);
-		fflush(stderr);
-		if (isTranspose || isConjTranspose) {
-			if (!((nrow_X == nrow_Y) && (ncol_Y == (int)a.cols()) && (ncol_X == nrow_A))) {
-				fprintf(stderr, "csr_matmul_post shape mismatch T: A=%d x %d, nrow_Y=%d, ncol_Y=%d, nrow_X=%d, ncol_X=%d\n",
-					 (int)nrow_A, (int)a.cols(), nrow_Y, ncol_Y, nrow_X, ncol_X);
-				fflush(stderr);
-			}
-		} else {
-			if (!((nrow_X == nrow_Y) && (ncol_Y == nrow_A) && (ncol_X == (int)a.cols()))) {
-				fprintf(stderr, "csr_matmul_post shape mismatch N: A=%d x %d, nrow_Y=%d, ncol_Y=%d, nrow_X=%d, ncol_X=%d\n",
-					 (int)nrow_A, (int)a.cols(), nrow_Y, ncol_Y, nrow_X, ncol_X);
-				fflush(stderr);
-			}
-		}
-		#endif
 		if (isTranspose || isConjTranspose) {
 			// op(A) == transpose(A): X += Y * transpose(A) -> use spmv with "N" on A (A * x)
 			KokkosSparse::spmv("N", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
