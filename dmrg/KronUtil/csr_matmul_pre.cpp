@@ -4,6 +4,9 @@
 #include <Kokkos_Complex.hpp>
 #include <KokkosSparse_CrsMatrix.hpp>
 #include <KokkosSparse_spmv.hpp>
+#ifdef USE_KOKKOSBATCHED
+#include <KokkosBatched_SerialBlas.hpp>
+#endif
 #include <vector>
 #include <type_traits>
 
@@ -49,7 +52,6 @@ void csr_matmul_pre(char                                                       t
 	int        isConjTranspose = (trans_A == 'C') || (trans_A == 'c');
 	int        isConj          = (trans_A == 'Z') || (trans_A == 'z');
 
-#ifdef USE_KOKKOS
 	// Kokkos path: compute X += op(A) * Y using KokkosSparse::spmv per column of Y
 	using HostExec = Kokkos::DefaultExecutionSpace;
 	HostExec exec;
@@ -90,9 +92,51 @@ void csr_matmul_pre(char                                                       t
 	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, HostExec> A_crs("A_crs", nrow_A, (int)a.cols(), nnz,
 	                                                              vals.data(), rowptr.data(), cols.data());
 
-	// For each column of Y perform spmv: xcol = op(A) * ycol
+	#ifdef USE_KOKKOSBATCHED
+	{
+		// Build device views (LayoutLeft so columns are contiguous) and helper arrays
+		Kokkos::View<int*, HostExec> rowptr_dev("rowptr", nrow_A+1);
+		Kokkos::View<int*, HostExec> cols_dev("cols", nnz);
+		Kokkos::View<int*, HostExec> rindex_dev("rindex", nnz);
+		Kokkos::View<KokkosScalar*, HostExec> vals_dev("vals", nnz);
+		for (int i=0;i<=nrow_A;++i) rowptr_dev(i)=rowptr[i];
+		for (int k=0;k<nnz;++k){ cols_dev(k)=cols[k]; vals_dev(k)=vals[k]; }
+		// build rindex: row index for each nz
+		for (int ia=0, k=0; ia<nrow_A; ++ia){ int ist=rowptr[ia]; int iend=rowptr[ia+1]; for (k=ist;k<iend;++k) rindex_dev(k)=ia; }
+
+		Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, HostExec> Y_dev("Y_dev", nrow_Y, ncol_Y);
+		Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, HostExec> X_dev("X_dev", nrow_X, ncol_X);
+		// copy yin into Y_dev and existing xout into X_dev
+		for (int i=0;i<nrow_Y;++i) for (int j=0;j<ncol_Y;++j) {
+			if constexpr (std::is_floating_point<ComplexOrRealType>::value) Y_dev(i,j)=yin(i,j);
+			else { auto vv=yin(i,j); Y_dev(i,j)=Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(),vv.imag()); }
+		}
+		for (int i=0;i<nrow_X;++i) for (int j=0;j<ncol_X;++j) {
+			if constexpr (std::is_floating_point<ComplexOrRealType>::value) X_dev(i,j)=xout(i,j);
+			else { auto vv=xout(i,j); X_dev(i,j)=Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(),vv.imag()); }
+		}
+
+		// For each nonzero, perform X_dev(row=ia, :) += vals[k] * Y_dev(row=ja, :)
+		Kokkos::parallel_for("csr_pre_batched", Kokkos::RangePolicy<HostExec>(0, nnz), KOKKOS_LAMBDA(const int k){
+			int ia = rindex_dev(k);
+			int ja = cols_dev(k);
+			KokkosScalar alpha = vals_dev(k);
+			// length = ncol_Y, Y pointer = &Y_dev(ja,0), stride = nrow_Y; X pointer = &X_dev(ia,0), stride = nrow_X
+			using SerialAxpy = KokkosBatched::SerialAxpy;
+			SerialAxpy::invoke(ncol_Y, alpha, &Y_dev(ja,0), nrow_Y, &X_dev(ia,0), nrow_X);
+		});
+		exec.fence();
+
+		// copy back X_dev into xout
+		for (int i=0;i<nrow_X;++i) for (int j=0;j<ncol_X;++j){
+			if constexpr (std::is_floating_point<ComplexOrRealType>::value) xout(i,j) = X_dev(i,j);
+			else { auto c = X_dev(i,j); xout(i,j) = ComplexOrRealType(static_cast<typename ComplexOrRealType::value_type>(c.real()), static_cast<typename ComplexOrRealType::value_type>(c.imag())); }
+		}
+	}
+	return;
+	#endif
+
 	const char trans = (isTranspose || isConjTranspose) ? 'T' : 'N';
-#endif
 
 	for (int jy = 0; jy < ncol_Y; ++jy) {
 		// load ycol (length nrow_Y) from yin (note nrow_Y expected == a.cols() when trans)
