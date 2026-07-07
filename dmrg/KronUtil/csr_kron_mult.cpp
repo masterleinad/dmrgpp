@@ -1,5 +1,7 @@
 #include "util.h"
 
+#include <Kokkos_Profiling_ScopedRegion.hpp>
+
 template <typename ComplexOrRealType>
 void csr_to_den(const PsimagLite::CrsMatrix<ComplexOrRealType>& a,
                 PsimagLite::Matrix<ComplexOrRealType>&          a_)
@@ -32,11 +34,8 @@ template <typename ComplexOrRealType>
 void csr_kron_mult_method(const int  imethod,
                           const char transA,
                           const char transB,
-
                           const PsimagLite::CrsMatrix<ComplexOrRealType>& a,
-
                           const PsimagLite::CrsMatrix<ComplexOrRealType>& b,
-
                           const PsimagLite::MatrixNonOwned<const ComplexOrRealType>& yin,
                           PsimagLite::MatrixNonOwned<ComplexOrRealType>&             xout)
 {
@@ -109,7 +108,7 @@ void csr_kron_mult_method(const int  imethod,
 	 */
 
 	if (imethod == 1) {
-
+Kokkos::Profiling::ScopedRegion region("imethod1");
 		/*
 		 *  --------------------------------------------
 		 *  BY(ib,ja) = (B(ib,jb))*Y(jb,ja)
@@ -185,6 +184,7 @@ void csr_kron_mult_method(const int  imethod,
 			                xout);
 		}
 	} else if (imethod == 2) {
+Kokkos::Profiling::ScopedRegion region("imethod2");
 		/*
 		 * ---------------------
 		 * YAt(jb,ia) = Y(jb,ja) * tranpose(A(ia,ja))
@@ -262,6 +262,7 @@ void csr_kron_mult_method(const int  imethod,
 			               xout);
 		}
 	} else if (imethod == 3) {
+Kokkos::Profiling::ScopedRegion region("imethod3");
 		/*
 		 * ---------------------------------------------
 		 * C = kron(A,B)

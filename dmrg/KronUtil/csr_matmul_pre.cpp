@@ -25,6 +25,7 @@ void csr_matmul_pre(char                                                       t
                     const int                                                  ncol_X,
                     PsimagLite::MatrixNonOwned<ComplexOrRealType>&             xout)
 {
+Kokkos::Profiling::ScopedRegion region("matmulpre");
 	/*
 	 * -------------------------------------------------------
 	 * A in compressed sparse ROW format
@@ -72,6 +73,7 @@ void csr_matmul_pre(char                                                       t
 			vals[k] = a.getValue(k);
 		} else {
 			ComplexOrRealType v = a.getValue(k);
+			if (is_complex && (isConj || isConjTranspose)) v = PsimagLite::conj(v);
 			vals[k] = Kokkos::complex<typename ComplexOrRealType::value_type>(v.real(), v.imag());
 		}
 	}
@@ -120,6 +122,7 @@ void csr_matmul_pre(char                                                       t
 				yhost[i] = yin(i, jy);
 			} else {
 				auto vv = yin(i, jy);
+				if (is_complex && isConj && !(isTranspose || isConjTranspose)) vv = PsimagLite::conj(vv);
 				yhost[i] = Kokkos::complex<typename ComplexOrRealType::value_type>(vv.real(), vv.imag());
 			}
 		}
