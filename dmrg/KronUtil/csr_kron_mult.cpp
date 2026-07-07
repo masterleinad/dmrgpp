@@ -357,51 +357,102 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 		int* b_cols_ptr = b_cols.data();
 		ComplexOrRealType* b_vals_ptr = b_vals.data();
 
-		// Parallel over target columns
-		Kokkos::parallel_for("imethod3_kron", Kokkos::RangePolicy<HostExec>(0, nTarget), KOKKOS_LAMBDA(const int jx) {
-			// local accumulation buffer for this target column
-			std::vector<ComplexOrRealType> ylocal((size_t)nrow_X);
-			// initialize from prefilled results_ptr
-			for (int ix=0; ix<nrow_X; ++ix) ylocal[ix] = results_ptr[(size_t)jx*(size_t)nrow_X + (size_t)ix];
 
-			int start = colPtr_ptr[jx];
-			int end = colPtr_ptr[jx+1];
-			for (int p = start; p < end; ++p) {
-				int ka = idxList_ptr[p];
-				int ia1 = rindexA_ptr[ka];
-				int ja = a_cols_ptr[ka];
-				ComplexOrRealType aij = a_vals_ptr[ka];
-				if (is_complex && isConjTransA) aij = PsimagLite::conj(aij);
+		// Create device Views for arrays
+		using Exec = Kokkos::DefaultExecutionSpace;
+		using MemSpace = typename Exec::memory_space;
 
-				// iterate over B rows and their nonzeros
-				for (int ib1 = 0; ib1 < nrow_B; ++ib1) {
-					int bstart = b_rowptr_ptr[ib1];
-					int bend = b_rowptr_ptr[ib1+1];
-					for (int kb=bstart; kb<bend; ++kb) {
-						int jb = b_cols_ptr[kb];
-						ComplexOrRealType bij = b_vals_ptr[kb];
-						if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
-						ComplexOrRealType cij = aij * bij;
+		Kokkos::View<int*, MemSpace> a_cols_dev("a_cols_dev", nnzA);
+		Kokkos::View<ComplexOrRealType*, MemSpace> a_vals_dev("a_vals_dev", nnzA);
+		Kokkos::View<int*, MemSpace> rindexA_dev("rindexA_dev", nnzA);
+		Kokkos::View<int*, MemSpace> colPtr_dev("colPtr_dev", nTarget+1);
+		Kokkos::View<int*, MemSpace> idxList_dev("idxList_dev", nnzA);
+		Kokkos::View<int*, MemSpace> b_rowptr_dev("b_rowptr_dev", nrow_B+1);
+		Kokkos::View<int*, MemSpace> b_cols_dev("b_cols_dev", nnzB);
+		Kokkos::View<ComplexOrRealType*, MemSpace> b_vals_dev("b_vals_dev", nnzB);
+		Kokkos::View<ComplexOrRealType*, MemSpace> results_dev("results_dev", (size_t)nTarget*(size_t)nrow_X);
+		Kokkos::View<ComplexOrRealType**, Kokkos::LayoutLeft, MemSpace> yin_dev("yin_dev", nrow_Y, ncol_Y);
 
-						int ix = doTransB ? jb : ib1;
-						int iy = doTransB ? ib1 : jb;
-						int jy = doTransA ? ia1 : ja;
-						// accumulate using yin_ptr (column-major)
-						ylocal[ix] += cij * yin_ptr[(size_t)iy + (size_t)jy*(size_t)nrow_Y];
+		// fill host mirrors then deep_copy to device
+		auto a_cols_h = Kokkos::create_mirror_view(a_cols_dev);
+		auto a_vals_h = Kokkos::create_mirror_view(a_vals_dev);
+		auto rindexA_h = Kokkos::create_mirror_view(rindexA_dev);
+		auto colPtr_h = Kokkos::create_mirror_view(colPtr_dev);
+		auto idxList_h = Kokkos::create_mirror_view(idxList_dev);
+		auto b_rowptr_h = Kokkos::create_mirror_view(b_rowptr_dev);
+		auto b_cols_h = Kokkos::create_mirror_view(b_cols_dev);
+		auto b_vals_h = Kokkos::create_mirror_view(b_vals_dev);
+		auto results_h = Kokkos::create_mirror_view(results_dev);
+		auto yin_h = Kokkos::create_mirror_view(yin_dev);
+
+		for (int k=0;k<nnzA;++k) { a_cols_h(k)=a_cols[k]; a_vals_h(k)=a_vals[k]; rindexA_h(k)=rindexA[k]; idxList_h(k)=idxList[k]; }
+		for (int i=0;i<=nTarget;++i) colPtr_h(i)=colPtr[i];
+		for (int k=0;k<nnzB;++k) { b_cols_h(k)=b_cols[k]; b_vals_h(k)=b_vals[k]; }
+		for (int i=0;i<=nrow_B;++i) b_rowptr_h(i)=b_rowptr[i];
+		// initialize results_h from results_ptr host data
+		for (size_t i=0;i<(size_t)nTarget*(size_t)nrow_X;++i) results_h(i) = results_ptr[i];
+		for (int jy=0;jy<ncol_Y;++jy) for (int iy=0;iy<nrow_Y;++iy) yin_h(iy,jy) = yin_ptr[(size_t)iy + (size_t)jy*(size_t)nrow_Y];
+
+		Kokkos::deep_copy(a_cols_dev, a_cols_h);
+		Kokkos::deep_copy(a_vals_dev, a_vals_h);
+		Kokkos::deep_copy(rindexA_dev, rindexA_h);
+		Kokkos::deep_copy(colPtr_dev, colPtr_h);
+		Kokkos::deep_copy(idxList_dev, idxList_h);
+		Kokkos::deep_copy(b_rowptr_dev, b_rowptr_h);
+		Kokkos::deep_copy(b_cols_dev, b_cols_h);
+		Kokkos::deep_copy(b_vals_dev, b_vals_h);
+		Kokkos::deep_copy(results_dev, results_h);
+		Kokkos::deep_copy(yin_dev, yin_h);
+
+		// TeamPolicy over target columns; each team writes its slice of results_dev
+		using team_policy = Kokkos::TeamPolicy<Exec>;
+		using member_type = team_policy::member_type;
+		team_policy policy(nTarget, Kokkos::AUTO);
+		Kokkos::parallel_for("imethod3_kron_team", policy, KOKKOS_LAMBDA(const member_type &member){
+			int jx = member.league_rank();
+			if (member.team_rank()==0) {
+				// serial accumulation by team leader into device results slice
+				for (int ix=0; ix<nrow_X; ++ix) {
+					// load initial value
+					// nothing to do here since results_dev already initialized
+				}
+
+				int start = colPtr_dev(jx);
+				int end = colPtr_dev(jx+1);
+				for (int p = start; p < end; ++p) {
+					int ka = idxList_dev(p);
+					int ia1 = rindexA_dev(ka);
+					int ja = a_cols_dev(ka);
+					ComplexOrRealType aij = a_vals_dev(ka);
+					if (is_complex && isConjTransA) aij = PsimagLite::conj(aij);
+
+					for (int ib1 = 0; ib1 < nrow_B; ++ib1) {
+						int bstart = b_rowptr_dev(ib1);
+						int bend = b_rowptr_dev(ib1+1);
+						for (int kb=bstart; kb<bend; ++kb) {
+							int jb = b_cols_dev(kb);
+							ComplexOrRealType bij = b_vals_dev(kb);
+							if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
+							ComplexOrRealType cij = aij * bij;
+
+							int ix = doTransB ? jb : ib1;
+							int iy = doTransB ? ib1 : jb;
+							int jy = doTransA ? ia1 : ja;
+							results_dev((size_t)jx*(size_t)nrow_X + (size_t)ix) += cij * yin_dev(iy, jy);
+						}
+						// team barrier not needed because single leader runs
 					}
 				}
 			}
-
-			// write results into flat buffer
-			for (int ix=0; ix<nrow_X; ++ix) results_ptr[(size_t)jx*(size_t)nrow_X + (size_t)ix] = ylocal[ix];
 		});
 
-		exec.fence();
+		Exec().fence();
 
-		// copy back into xout from results_flat
+		// copy back results_dev to host and then into xout
+		Kokkos::deep_copy(results_h, results_dev);
 		for (int jx=0; jx<nTarget; ++jx)
 			for (int ix=0; ix<nrow_X; ++ix)
-				xout(ix, jx) = results_ptr[(size_t)jx*(size_t)nrow_X + (size_t)ix];
+				xout(ix, jx) = results_h[(size_t)jx*(size_t)nrow_X + (size_t)ix];
 
 		exec.fence();
 	}
