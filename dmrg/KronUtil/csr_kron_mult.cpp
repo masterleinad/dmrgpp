@@ -5,6 +5,16 @@
 #include <Kokkos_Core.hpp>
 #endif
 
+template <typename T> struct KokkosType {
+	using type = T;
+};
+
+template <typename T>
+        requires(!std::is_floating_point_v<T>)
+struct KokkosType<T> {
+	using type = Kokkos::complex<typename T::value_type>;
+};
+
 template <typename ComplexOrRealType>
 void csr_to_den(const PsimagLite::CrsMatrix<ComplexOrRealType>& a,
                 PsimagLite::Matrix<ComplexOrRealType>&          a_)
@@ -42,7 +52,7 @@ void csr_kron_mult_method(const int  imethod,
                           const PsimagLite::MatrixNonOwned<const ComplexOrRealType>& yin,
                           PsimagLite::MatrixNonOwned<ComplexOrRealType>&             xout)
 {
-	const bool is_complex   = PsimagLite::IsComplexNumber<ComplexOrRealType>::True;
+	constexpr bool is_complex   = PsimagLite::IsComplexNumber<ComplexOrRealType>::True;
 	const int  isTransA     = (transA == 'T') || (transA == 't');
 	const int  isTransB     = (transB == 'T') || (transB == 't');
 	const int  isConjTransA = (transA == 'C') || (transA == 'c');
@@ -382,19 +392,21 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 		using Exec = Kokkos::DefaultExecutionSpace;
 		using MemSpace = typename Exec::memory_space;
 
-		Kokkos::View<int*, MemSpace> a_cols_dev("a_cols_dev", nnzA);
-		Kokkos::View<ComplexOrRealType*, MemSpace> a_vals_dev("a_vals_dev", nnzA);
-		Kokkos::View<int*, MemSpace> rindexA_dev("rindexA_dev", nnzA);
-		Kokkos::View<int*, MemSpace> colPtr_dev("colPtr_dev", nTarget+1);
-		Kokkos::View<int*, MemSpace> idxList_dev("idxList_dev", nnzA);
-		Kokkos::View<int*, MemSpace> b_rowptr_dev("b_rowptr_dev", nrow_B+1);
-		Kokkos::View<int*, MemSpace> b_cols_dev("b_cols_dev", nnzB);
-		Kokkos::View<ComplexOrRealType*, MemSpace> b_vals_dev("b_vals_dev", nnzB);
-		Kokkos::View<int*, MemSpace> b_row_of_dev("b_row_of_dev", nnzB);
-		Kokkos::View<int*, MemSpace> colPtrB_dev("colPtrB_dev", ncol_B+1);
-		Kokkos::View<int*, MemSpace> idxListB_dev("idxListB_dev", nnzB);
-		Kokkos::View<ComplexOrRealType*, MemSpace> results_dev("results_dev", (size_t)nTarget*(size_t)nrow_X);
-		Kokkos::View<ComplexOrRealType**, Kokkos::LayoutLeft, MemSpace> yin_dev("yin_dev", nrow_Y, ncol_Y);
+    using KokkosScalar = KokkosType<ComplexOrRealType>::type;
+
+		Kokkos::View<int*, MemSpace> a_cols_dev(Kokkos::view_alloc("a_cols_dev", Kokkos::WithoutInitializing), nnzA);
+		Kokkos::View<KokkosScalar*, MemSpace> a_vals_dev(Kokkos::view_alloc("a_vals_dev", Kokkos::WithoutInitializing), nnzA);
+		Kokkos::View<int*, MemSpace> rindexA_dev(Kokkos::view_alloc("rindexA_dev", Kokkos::WithoutInitializing), nnzA);
+		Kokkos::View<int*, MemSpace> colPtr_dev(Kokkos::view_alloc("colPtr_dev", Kokkos::WithoutInitializing), nTarget+1);
+		Kokkos::View<int*, MemSpace> idxList_dev(Kokkos::view_alloc("idxList_dev", Kokkos::WithoutInitializing), nnzA);
+		Kokkos::View<int*, MemSpace> b_rowptr_dev(Kokkos::view_alloc("b_rowptr_dev", Kokkos::WithoutInitializing), nrow_B+1);
+		Kokkos::View<int*, MemSpace> b_cols_dev(Kokkos::view_alloc("b_cols_dev", Kokkos::WithoutInitializing), nnzB);
+		Kokkos::View<KokkosScalar*, MemSpace> b_vals_dev(Kokkos::view_alloc("b_vals_dev", Kokkos::WithoutInitializing), nnzB);
+		Kokkos::View<int*, MemSpace> b_row_of_dev(Kokkos::view_alloc("b_row_of_dev", Kokkos::WithoutInitializing), nnzB);
+		Kokkos::View<int*, MemSpace> colPtrB_dev(Kokkos::view_alloc("colPtrB_dev", Kokkos::WithoutInitializing), ncol_B+1);
+		Kokkos::View<int*, MemSpace> idxListB_dev(Kokkos::view_alloc("idxListB_dev", Kokkos::WithoutInitializing), nnzB);
+		Kokkos::View<KokkosScalar*, MemSpace> results_dev(Kokkos::view_alloc("results_dev", Kokkos::WithoutInitializing), (size_t)nTarget*(size_t)nrow_X);
+		Kokkos::View<KokkosScalar**, Kokkos::LayoutLeft, MemSpace> yin_dev(Kokkos::view_alloc("yin_dev", Kokkos::WithoutInitializing), nrow_Y, ncol_Y);
 
 		// fill host mirrors then deep_copy to device
 		auto a_cols_h = Kokkos::create_mirror_view(a_cols_dev);
@@ -447,7 +459,7 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 			int jx = member.league_rank();
 			// Parallelize over output rows ix using team threads; selectively vectorize inner loops
 			Kokkos::parallel_for(Kokkos::TeamThreadRange(member, nrow_X), [&](const int ix){
-				ComplexOrRealType acc = results_dev((size_t)jx*(size_t)nrow_X + (size_t)ix);
+				auto acc = results_dev((size_t)jx*(size_t)nrow_X + (size_t)ix);
 
 				int start = colPtr_dev(jx);
 				int end = colPtr_dev(jx+1);
@@ -456,8 +468,8 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 					int ka = idxList_dev(p);
 					int ia1 = rindexA_dev(ka);
 					int ja = a_cols_dev(ka);
-					ComplexOrRealType aij = a_vals_dev(ka);
-					if (is_complex && isConjTransA) aij = PsimagLite::conj(aij);
+					auto aij = a_vals_dev(ka);
+					if constexpr (is_complex) if(  isConjTransA) aij = Kokkos::conj(aij);
 
 					if (!doTransB) {
 						int ib1 = ix; // ix corresponds to ib1
@@ -468,9 +480,9 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 							Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, len), [&](const int t){
 								int kb = bstart + t;
 								int jb = b_cols_dev(kb);
-								ComplexOrRealType bij = b_vals_dev(kb);
-								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
-								ComplexOrRealType cij = aij * bij;
+								auto bij = b_vals_dev(kb);
+								if constexpr (is_complex) if(  isConjTransB) bij = Kokkos::conj(bij);
+								auto cij = aij * bij;
 								int iy = jb;
 								int jy = doTransA ? ia1 : ja;
 								acc += cij * yin_dev(iy, jy);
@@ -478,9 +490,9 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 						} else {
 							for (int kb=bstart; kb<bend; ++kb) {
 								int jb = b_cols_dev(kb);
-								ComplexOrRealType bij = b_vals_dev(kb);
-								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
-								ComplexOrRealType cij = aij * bij;
+								auto bij = b_vals_dev(kb);
+								if constexpr (is_complex) if(  isConjTransB) bij = Kokkos::conj(bij);
+								auto cij = aij * bij;
 								int iy = jb;
 								int jy = doTransA ? ia1 : ja;
 								acc += cij * yin_dev(iy, jy);
@@ -497,9 +509,9 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 								int pos = bstart + t;
 								int kpos = idxListB_dev(pos);
 								int ib1 = b_row_of_dev(kpos);
-								ComplexOrRealType bij = b_vals_dev(kpos);
-								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
-								ComplexOrRealType cij = aij * bij;
+								auto bij = b_vals_dev(kpos);
+								if constexpr (is_complex) if(  isConjTransB) bij = Kokkos::conj(bij);
+								auto cij = aij * bij;
 								int iy = ib1;
 								int jy = doTransA ? ia1 : ja;
 								acc += cij * yin_dev(iy, jy);
@@ -508,9 +520,9 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 							for (int pos = bstart; pos < bend; ++pos) {
 								int kpos = idxListB_dev(pos);
 								int ib1 = b_row_of_dev(kpos);
-								ComplexOrRealType bij = b_vals_dev(kpos);
-								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
-								ComplexOrRealType cij = aij * bij;
+								auto bij = b_vals_dev(kpos);
+								if constexpr (is_complex) if(  isConjTransB) bij = Kokkos::conj(bij);
+								auto cij = aij * bij;
 								int iy = ib1;
 								int jy = doTransA ? ia1 : ja;
 								acc += cij * yin_dev(iy, jy);
