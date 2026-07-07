@@ -299,12 +299,32 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 		for (int i = 0; i <= nrow_B; ++i) b_rowptr[i] = b.getRowPtr(i);
 		std::vector<int> b_cols(nnzB);
 		std::vector<ComplexOrRealType> b_vals(nnzB);
+		std::vector<int> b_row_of(nnzB);
 		for (int k = 0, ib1 = 0; ib1 < nrow_B; ++ib1) {
 			int ist = b_rowptr[ib1];
 			int iend = b_rowptr[ib1+1];
 			for (int kk=ist; kk<iend; ++kk, ++k) {
 				b_cols[k] = b.getCol(kk);
 				b_vals[k] = b.getValue(kk);
+				b_row_of[k] = ib1; // remember the row for this nonzero
+			}
+		}
+
+		// Build CSC-like index for B: group nonzeros by column jb
+		std::vector<int> colCountsB(ncol_B, 0);
+		for (int k=0;k<nnzB;++k) {
+			int jb = b_cols[k];
+			if (jb>=0 && jb < ncol_B) ++colCountsB[jb];
+		}
+		std::vector<int> colPtrB(ncol_B+1, 0);
+		for (int i=0;i<ncol_B;++i) colPtrB[i+1] = colPtrB[i] + colCountsB[i];
+		std::vector<int> idxListB(nnzB);
+		{
+			std::vector<int> curB(colPtrB.begin(), colPtrB.end());
+			for (int k=0;k<nnzB;++k) {
+				int jb = b_cols[k];
+				int pos = curB[jb]++;
+				idxListB[pos] = k; // store index into b_* arrays
 			}
 		}
 
@@ -370,6 +390,9 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 		Kokkos::View<int*, MemSpace> b_rowptr_dev("b_rowptr_dev", nrow_B+1);
 		Kokkos::View<int*, MemSpace> b_cols_dev("b_cols_dev", nnzB);
 		Kokkos::View<ComplexOrRealType*, MemSpace> b_vals_dev("b_vals_dev", nnzB);
+		Kokkos::View<int*, MemSpace> b_row_of_dev("b_row_of_dev", nnzB);
+		Kokkos::View<int*, MemSpace> colPtrB_dev("colPtrB_dev", ncol_B+1);
+		Kokkos::View<int*, MemSpace> idxListB_dev("idxListB_dev", nnzB);
 		Kokkos::View<ComplexOrRealType*, MemSpace> results_dev("results_dev", (size_t)nTarget*(size_t)nrow_X);
 		Kokkos::View<ComplexOrRealType**, Kokkos::LayoutLeft, MemSpace> yin_dev("yin_dev", nrow_Y, ncol_Y);
 
@@ -382,13 +405,18 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 		auto b_rowptr_h = Kokkos::create_mirror_view(b_rowptr_dev);
 		auto b_cols_h = Kokkos::create_mirror_view(b_cols_dev);
 		auto b_vals_h = Kokkos::create_mirror_view(b_vals_dev);
+		auto b_row_of_h = Kokkos::create_mirror_view(b_row_of_dev);
+		auto colPtrB_h = Kokkos::create_mirror_view(colPtrB_dev);
+		auto idxListB_h = Kokkos::create_mirror_view(idxListB_dev);
 		auto results_h = Kokkos::create_mirror_view(results_dev);
 		auto yin_h = Kokkos::create_mirror_view(yin_dev);
 
 		for (int k=0;k<nnzA;++k) { a_cols_h(k)=a_cols[k]; a_vals_h(k)=a_vals[k]; rindexA_h(k)=rindexA[k]; idxList_h(k)=idxList[k]; }
 		for (int i=0;i<=nTarget;++i) colPtr_h(i)=colPtr[i];
-		for (int k=0;k<nnzB;++k) { b_cols_h(k)=b_cols[k]; b_vals_h(k)=b_vals[k]; }
+		for (int k=0;k<nnzB;++k) { b_cols_h(k)=b_cols[k]; b_vals_h(k)=b_vals[k]; b_row_of_h(k)=b_row_of[k]; }
 		for (int i=0;i<=nrow_B;++i) b_rowptr_h(i)=b_rowptr[i];
+		for (int i=0;i<=ncol_B;++i) colPtrB_h(i)=colPtrB[i];
+		for (int k=0;k<nnzB;++k) idxListB_h(k)=idxListB[k];
 		// initialize results_h from results_ptr host data
 		for (size_t i=0;i<(size_t)nTarget*(size_t)nrow_X;++i) results_h(i) = results_ptr[i];
 		for (int jy=0;jy<ncol_Y;++jy) for (int iy=0;iy<nrow_Y;++iy) yin_h(iy,jy) = yin_ptr[(size_t)iy + (size_t)jy*(size_t)nrow_Y];
@@ -401,8 +429,15 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 		Kokkos::deep_copy(b_rowptr_dev, b_rowptr_h);
 		Kokkos::deep_copy(b_cols_dev, b_cols_h);
 		Kokkos::deep_copy(b_vals_dev, b_vals_h);
+		Kokkos::deep_copy(b_row_of_dev, b_row_of_h);
+		Kokkos::deep_copy(colPtrB_dev, colPtrB_h);
+		Kokkos::deep_copy(idxListB_dev, idxListB_h);
+		Kokkos::deep_copy(b_rowptr_dev, b_rowptr_h);
+		Kokkos::deep_copy(b_cols_dev, b_cols_h);
+		Kokkos::deep_copy(b_vals_dev, b_vals_h);
 		Kokkos::deep_copy(results_dev, results_h);
 		Kokkos::deep_copy(yin_dev, yin_h);
+
 
 		// TeamPolicy over target columns; each team writes its slice of results_dev
 		using team_policy = Kokkos::TeamPolicy<Exec>;
@@ -410,15 +445,13 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 		team_policy policy(nTarget, Kokkos::AUTO);
 		Kokkos::parallel_for("imethod3_kron_team", policy, KOKKOS_LAMBDA(const member_type &member){
 			int jx = member.league_rank();
-			if (member.team_rank()==0) {
-				// serial accumulation by team leader into device results slice
-				for (int ix=0; ix<nrow_X; ++ix) {
-					// load initial value
-					// nothing to do here since results_dev already initialized
-				}
+			// Parallelize over output rows ix using team threads; selectively vectorize inner loops
+			Kokkos::parallel_for(Kokkos::TeamThreadRange(member, nrow_X), [&](const int ix){
+				ComplexOrRealType acc = results_dev((size_t)jx*(size_t)nrow_X + (size_t)ix);
 
 				int start = colPtr_dev(jx);
 				int end = colPtr_dev(jx+1);
+
 				for (int p = start; p < end; ++p) {
 					int ka = idxList_dev(p);
 					int ia1 = rindexA_dev(ka);
@@ -426,24 +459,68 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 					ComplexOrRealType aij = a_vals_dev(ka);
 					if (is_complex && isConjTransA) aij = PsimagLite::conj(aij);
 
-					for (int ib1 = 0; ib1 < nrow_B; ++ib1) {
+					if (!doTransB) {
+						int ib1 = ix; // ix corresponds to ib1
 						int bstart = b_rowptr_dev(ib1);
 						int bend = b_rowptr_dev(ib1+1);
-						for (int kb=bstart; kb<bend; ++kb) {
-							int jb = b_cols_dev(kb);
-							ComplexOrRealType bij = b_vals_dev(kb);
-							if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
-							ComplexOrRealType cij = aij * bij;
-
-							int ix = doTransB ? jb : ib1;
-							int iy = doTransB ? ib1 : jb;
-							int jy = doTransA ? ia1 : ja;
-							results_dev((size_t)jx*(size_t)nrow_X + (size_t)ix) += cij * yin_dev(iy, jy);
+						int len = bend - bstart;
+						if (len > 32) {
+							Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, len), [&](const int t){
+								int kb = bstart + t;
+								int jb = b_cols_dev(kb);
+								ComplexOrRealType bij = b_vals_dev(kb);
+								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
+								ComplexOrRealType cij = aij * bij;
+								int iy = jb;
+								int jy = doTransA ? ia1 : ja;
+								acc += cij * yin_dev(iy, jy);
+							});
+						} else {
+							for (int kb=bstart; kb<bend; ++kb) {
+								int jb = b_cols_dev(kb);
+								ComplexOrRealType bij = b_vals_dev(kb);
+								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
+								ComplexOrRealType cij = aij * bij;
+								int iy = jb;
+								int jy = doTransA ? ia1 : ja;
+								acc += cij * yin_dev(iy, jy);
+							}
 						}
-						// team barrier not needed because single leader runs
+					} else {
+						// doTransB true: ix is jb (column index)
+						int jb = ix;
+						int bstart = colPtrB_dev(jb);
+						int bend = colPtrB_dev(jb+1);
+						int len = bend - bstart;
+						if (len > 32) {
+							Kokkos::parallel_for(Kokkos::ThreadVectorRange(member, len), [&](const int t){
+								int pos = bstart + t;
+								int kpos = idxListB_dev(pos);
+								int ib1 = b_row_of_dev(kpos);
+								ComplexOrRealType bij = b_vals_dev(kpos);
+								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
+								ComplexOrRealType cij = aij * bij;
+								int iy = ib1;
+								int jy = doTransA ? ia1 : ja;
+								acc += cij * yin_dev(iy, jy);
+							});
+						} else {
+							for (int pos = bstart; pos < bend; ++pos) {
+								int kpos = idxListB_dev(pos);
+								int ib1 = b_row_of_dev(kpos);
+								ComplexOrRealType bij = b_vals_dev(kpos);
+								if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
+								ComplexOrRealType cij = aij * bij;
+								int iy = ib1;
+								int jy = doTransA ? ia1 : ja;
+								acc += cij * yin_dev(iy, jy);
+							}
+						}
 					}
 				}
-			}
+
+				results_dev((size_t)jx*(size_t)nrow_X + (size_t)ix) = acc;
+			});
 		});
 
 		Exec().fence();
@@ -454,7 +531,7 @@ Kokkos::Profiling::ScopedRegion region("imethod3");
 			for (int ix=0; ix<nrow_X; ++ix)
 				xout(ix, jx) = results_h[(size_t)jx*(size_t)nrow_X + (size_t)ix];
 
-		exec.fence();
+		Exec().fence();
 	}
 }
 
