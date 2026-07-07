@@ -1,6 +1,9 @@
 #include "util.h"
 
 #include <Kokkos_Profiling_ScopedRegion.hpp>
+#ifdef USE_KOKKOS
+#include <Kokkos_Core.hpp>
+#endif
 
 template <typename ComplexOrRealType>
 void csr_to_den(const PsimagLite::CrsMatrix<ComplexOrRealType>& a,
@@ -264,51 +267,144 @@ Kokkos::Profiling::ScopedRegion region("imethod2");
 	} else if (imethod == 3) {
 Kokkos::Profiling::ScopedRegion region("imethod3");
 		/*
-		 * ---------------------------------------------
-		 * C = kron(A,B)
-		 * C([ib,ia], [jb,ja]) = A(ia,ja)*B(ib,jb)
-		 * X([ib,ia]) += C([ib,ia],[jb,ja]) * Y([jb,ja])
-		 * ---------------------------------------------
+		 * Parallel device-friendly implementation (team-per-target-column style):
+		 * - group nonzeros of A by target column jx = (doTransA ? ja : ia)
+		 * - for each target column, accumulate contributions into a local buffer
+		 *   (size nrow_X) and then write it back into xout(:, jx) without atomics.
 		 */
 
-		int ia = 0;
-		int ka = 0;
-		int ib = 0;
-		int kb = 0;
-		for (ia = 0; ia < nrow_A; ia++) {
-			int istarta = a.getRowPtr(ia);
-			int ienda   = a.getRowPtr(ia + 1);
-			for (ka = istarta; ka < ienda; ka++) {
-				int               ja  = a.getCol(ka);
-				ComplexOrRealType aij = a.getValue(ka);
-				if (is_complex && isConjTransA) {
-					aij = PsimagLite::conj(aij);
-				};
+		bool doTransA = (isTransA || isConjTransA);
+		bool doTransB = (isTransB || isConjTransB);
 
-				for (ib = 0; ib < nrow_B; ib++) {
-					int istartb = b.getRowPtr(ib);
-					int iendb   = b.getRowPtr(ib + 1);
+		// Build arrays for A
+		int nnzA = 0;
+		for (int ia1 = 0; ia1 < nrow_A; ++ia1) nnzA += (a.getRowPtr(ia1 + 1) - a.getRowPtr(ia1));
+		std::vector<int> a_rowptr(nrow_A + 1);
+		for (int i = 0; i <= nrow_A; ++i) a_rowptr[i] = a.getRowPtr(i);
+		std::vector<int> a_cols(nnzA);
+		std::vector<ComplexOrRealType> a_vals(nnzA);
+		for (int k = 0, ia1 = 0; ia1 < nrow_A; ++ia1) {
+			int ist = a_rowptr[ia1];
+			int iend = a_rowptr[ia1+1];
+			for (int kk=ist; kk<iend; ++kk, ++k) {
+				a_cols[k] = a.getCol(kk);
+				a_vals[k] = a.getValue(kk);
+			}
+		}
 
-					for (kb = istartb; kb < iendb; kb++) {
-						int               jb  = b.getCol(kb);
-						ComplexOrRealType bij = b.getValue(kb);
-						if (is_complex && isConjTransB) {
-							bij = PsimagLite::conj(bij);
-						};
+		// Build arrays for B
+		int nnzB = 0;
+		for (int ib1 = 0; ib1 < nrow_B; ++ib1) nnzB += (b.getRowPtr(ib1 + 1) - b.getRowPtr(ib1));
+		std::vector<int> b_rowptr(nrow_B + 1);
+		for (int i = 0; i <= nrow_B; ++i) b_rowptr[i] = b.getRowPtr(i);
+		std::vector<int> b_cols(nnzB);
+		std::vector<ComplexOrRealType> b_vals(nnzB);
+		for (int k = 0, ib1 = 0; ib1 < nrow_B; ++ib1) {
+			int ist = b_rowptr[ib1];
+			int iend = b_rowptr[ib1+1];
+			for (int kk=ist; kk<iend; ++kk, ++k) {
+				b_cols[k] = b.getCol(kk);
+				b_vals[k] = b.getValue(kk);
+			}
+		}
 
+		// Map A nonzeros to target columns (jx)
+		int nTarget = ncol_X;
+		std::vector<int> colCounts(nTarget, 0);
+		std::vector<int> rindexA(nnzA);
+		for (int ia1 = 0, k=0; ia1 < nrow_A; ++ia1) {
+			int ist = a_rowptr[ia1];
+			int iend = a_rowptr[ia1+1];
+			for (int kk=ist; kk<iend; ++kk, ++k) {
+				rindexA[k] = ia1;
+				int ja = a_cols[k];
+				int tgt = doTransA ? ja : ia1;
+				if (tgt>=0 && tgt < nTarget) ++colCounts[tgt];
+			}
+		}
+		std::vector<int> colPtr(nTarget+1,0);
+		for (int i=0;i<nTarget;++i) colPtr[i+1] = colPtr[i] + colCounts[i];
+		std::vector<int> idxList(nnzA);
+		std::vector<int> cur(colPtr.begin(), colPtr.end());
+		for (int k=0;k<nnzA;++k) {
+			int tgt = doTransA ? a_cols[k] : rindexA[k];
+			int pos = cur[tgt]++;
+			idxList[pos] = k;
+		}
+
+		using HostExec = Kokkos::DefaultExecutionSpace;
+		HostExec exec;
+		Kokkos::fence();
+
+		// Prepare output flat buffer to collect per-column results (flattened by column)
+		std::vector<ComplexOrRealType> results_flat((size_t)nTarget * (size_t)nrow_X);
+		// initialize from current xout
+		for (int jx=0; jx<nTarget; ++jx) for (int ix=0; ix<nrow_X; ++ix) results_flat[(size_t)jx*(size_t)nrow_X + (size_t)ix] = xout(ix, jx);
+		ComplexOrRealType* results_ptr = results_flat.data();
+
+		// prepare flat yin array to avoid capturing MatrixNonOwned
+		std::vector<ComplexOrRealType> yin_flat((size_t)nrow_Y * (size_t)ncol_Y);
+		for (int jy=0;jy<ncol_Y;++jy) for (int iy=0;iy<nrow_Y;++iy) yin_flat[(size_t)iy + (size_t)jy*(size_t)nrow_Y] = yin(iy,jy);
+		ComplexOrRealType* yin_ptr = yin_flat.data();
+
+		// expose raw pointers for arrays so lambda copy is cheap
+		int* a_cols_ptr = a_cols.data();
+		ComplexOrRealType* a_vals_ptr = a_vals.data();
+		int* rindexA_ptr = rindexA.data();
+		int* colPtr_ptr = colPtr.data();
+		int* idxList_ptr = idxList.data();
+		int* b_rowptr_ptr = b_rowptr.data();
+		int* b_cols_ptr = b_cols.data();
+		ComplexOrRealType* b_vals_ptr = b_vals.data();
+
+		// Parallel over target columns
+		Kokkos::parallel_for("imethod3_kron", Kokkos::RangePolicy<HostExec>(0, nTarget), KOKKOS_LAMBDA(const int jx) {
+			// local accumulation buffer for this target column
+			std::vector<ComplexOrRealType> ylocal((size_t)nrow_X);
+			// initialize from prefilled results_ptr
+			for (int ix=0; ix<nrow_X; ++ix) ylocal[ix] = results_ptr[(size_t)jx*(size_t)nrow_X + (size_t)ix];
+
+			int start = colPtr_ptr[jx];
+			int end = colPtr_ptr[jx+1];
+			for (int p = start; p < end; ++p) {
+				int ka = idxList_ptr[p];
+				int ia1 = rindexA_ptr[ka];
+				int ja = a_cols_ptr[ka];
+				ComplexOrRealType aij = a_vals_ptr[ka];
+				if (is_complex && isConjTransA) aij = PsimagLite::conj(aij);
+
+				// iterate over B rows and their nonzeros
+				for (int ib1 = 0; ib1 < nrow_B; ++ib1) {
+					int bstart = b_rowptr_ptr[ib1];
+					int bend = b_rowptr_ptr[ib1+1];
+					for (int kb=bstart; kb<bend; ++kb) {
+						int jb = b_cols_ptr[kb];
+						ComplexOrRealType bij = b_vals_ptr[kb];
+						if (is_complex && isConjTransB) bij = PsimagLite::conj(bij);
 						ComplexOrRealType cij = aij * bij;
 
-						int ix = (isTransB || isConjTransB) ? jb : ib;
-						int jx = (isTransA || isConjTransA) ? ja : ia;
-						int iy = (isTransB || isConjTransB) ? ib : jb;
-						int jy = (isTransA || isConjTransA) ? ia : ja;
+						int ix = doTransB ? jb : ib1;
+						int iy = doTransB ? ib1 : jb;
+						int jy = doTransA ? ia1 : ja;
+						// accumulate using yin_ptr (column-major)
+						ylocal[ix] += cij * yin_ptr[(size_t)iy + (size_t)jy*(size_t)nrow_Y];
+					}
+				}
+			}
 
-						xout(ix, jx) += cij * yin(iy, jy);
-					};
-				};
-			};
-		};
-	};
+			// write results into flat buffer
+			for (int ix=0; ix<nrow_X; ++ix) results_ptr[(size_t)jx*(size_t)nrow_X + (size_t)ix] = ylocal[ix];
+		});
+
+		exec.fence();
+
+		// copy back into xout from results_flat
+		for (int jx=0; jx<nTarget; ++jx)
+			for (int ix=0; ix<nrow_X; ++ix)
+				xout(ix, jx) = results_ptr[(size_t)jx*(size_t)nrow_X + (size_t)ix];
+
+		exec.fence();
+	}
 }
 
 template <typename ComplexOrRealType>
