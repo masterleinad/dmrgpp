@@ -107,18 +107,19 @@ void csr_matmul_post(char                                                       
 	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, HostExec> A_crs(
 	    "A_crs", nrow_A, (int)a.cols(), nnz, vals.data(), rowptr.data(), cols.data());
 
+    std::vector<KokkosScalar>                      xhost;
+    std::vector<KokkosScalar> yhost;
+
+{
+#ifdef PSIMAGLITE_USE_KOKKOS
+  Kokkos::Profiling::ScopedRegion region("PsimagLite::csr_matmul_post::kernel");
+#endif
+
 	// For each column of Y perform spmv
 	for (int iy = 0; iy < nrow_Y; ++iy) {
-		std::vector<KokkosScalar> yhost((size_t)ncol_Y);
-		for (int j = 0; j < ncol_Y; ++j) {
-			if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+		yhost.resize((size_t)ncol_Y);
+		for (int j = 0; j < ncol_Y; ++j)
 				yhost[j] = yin(iy, j);
-			} else {
-				auto vv  = yin(iy, j);
-				yhost[j] = Kokkos::complex<typename ComplexOrRealType::value_type>(
-				    vv.real(), vv.imag());
-			}
-		}
 
 		auto y_dev = Kokkos::create_mirror_view_and_copy(
 		    HostExec(),
@@ -127,30 +128,22 @@ void csr_matmul_post(char                                                       
 		auto x_dev_out = Kokkos::View<KokkosScalar*>("x_dev_out", ncol_X);
 
 		if (isTranspose || isConjTranspose) {
-			KokkosSparse::spmv(
+			KokkosSparse::spmv(exec,
 			    "N", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
 		} else {
-			KokkosSparse::spmv(
+			KokkosSparse::spmv(exec,
 			    "T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
 		}
 
-		std::vector<KokkosScalar>                      xhost((size_t)ncol_X);
+		xhost.resize((size_t)ncol_X);
 		Kokkos::View<KokkosScalar*, Kokkos::HostSpace> h_xhost(xhost.data(), ncol_X);
-		Kokkos::deep_copy(h_xhost, x_dev_out);
+		Kokkos::deep_copy(exec, h_xhost, x_dev_out);
 		exec.fence();
 
-		for (int jx = 0; jx < ncol_X; ++jx) {
-			if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+		for (int jx = 0; jx < ncol_X; ++jx)
 				xout(iy, jx) += xhost[jx];
-			} else {
-				Kokkos::complex<typename ComplexOrRealType::value_type> c
-				    = xhost[jx];
-				xout(iy, jx) += ComplexOrRealType(
-				    static_cast<typename ComplexOrRealType::value_type>(c.real()),
-				    static_cast<typename ComplexOrRealType::value_type>(c.imag()));
-			}
-		}
 	}
+}
 
 	return;
 #endif
