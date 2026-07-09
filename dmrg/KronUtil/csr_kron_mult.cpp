@@ -145,18 +145,6 @@ void csr_kron_mult_method(const int                                             
 		 */
 
 		{
-			int iby = 0;
-			int jby = 0;
-
-			// not needed FIXME
-			for (jby = 0; jby < ncol_BY; jby++) {
-				for (iby = 0; iby < nrow_BY; iby++) {
-					by_(iby, jby) = 0;
-				};
-			};
-		}
-
-		{
 			/*
 			 * ------------------------------
 			 * BY(ib,ja)  = B(ib,jb)*Y(jb,ja)
@@ -221,18 +209,6 @@ void csr_kron_mult_method(const int                                             
 		 * setup YAt(jb,ia)
 		 * ----------------
 		 */
-
-		{
-			int iy = 0;
-			int jy = 0;
-
-			// not needed FIXME
-			for (jy = 0; jy < ncol_YAt; jy++) {
-				for (iy = 0; iy < nrow_YAt; iy++) {
-					yat_(iy, jy) = 0;
-				};
-			};
-		}
 
 		{
 			/*
