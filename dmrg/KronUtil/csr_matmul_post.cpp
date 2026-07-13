@@ -110,6 +110,8 @@ void csr_matmul_post(char                                                       
     std::vector<KokkosScalar>                      xhost(ncol_X);
     std::vector<KokkosScalar> yhost(ncol_Y);
     Kokkos::View<KokkosScalar*> x_dev_out("x_dev_out", ncol_X);          
+    Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> yin_host(reinterpret_cast<const KokkosScalar*>(&yin(0,0)), nrow_Y, ncol_Y);
+    auto y_dev = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, yin_host);
 
 {
 #ifdef PSIMAGLITE_USE_KOKKOS
@@ -117,22 +119,10 @@ void csr_matmul_post(char                                                       
 #endif
 
 	// For each column of Y perform spmv
+  auto label =  ((isTranspose || isConjTranspose)?"N":"T");
 	for (int iy = 0; iy < nrow_Y; ++iy) {
-		for (int j = 0; j < ncol_Y; ++j)
-				yhost[j] = yin(iy, j);
-
-		auto y_dev = Kokkos::create_mirror_view_and_copy(
-		    ExecutionSpace(),
-		    Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
-		        yhost.data(), ncol_Y));
-
-		if (isTranspose || isConjTranspose) {
-			KokkosSparse::spmv(exec,
-			    "N", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
-		} else {
-			KokkosSparse::spmv(exec,
-			    "T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
-		}
+	  KokkosSparse::spmv(exec,
+			    label, (KokkosScalar)1.0, A_crs, Kokkos::subview(y_dev, iy, Kokkos::ALL), (KokkosScalar)0.0, x_dev_out);
 
 		Kokkos::View<KokkosScalar*, Kokkos::HostSpace> h_xhost(xhost.data(), ncol_X);
 		Kokkos::deep_copy(exec, h_xhost, x_dev_out);
