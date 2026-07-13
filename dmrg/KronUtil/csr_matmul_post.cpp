@@ -141,7 +141,7 @@ void csr_matmul_post(char                                                       
 		exec.fence();
 
 		for (int jx = 0; jx < ncol_X; ++jx)
-				xout(iy, jx) += xhost[jx];
+        xout(iy, jx) += static_cast<ComplexOrRealType>(xhost[jx]);
 	}
 }
 
