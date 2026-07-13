@@ -107,9 +107,7 @@ void csr_matmul_post(char                                                       
 	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, ExecutionSpace> A_crs(
 	    "A_crs", nrow_A, (int)a.cols(), nnz, vals.data(), rowptr.data(), cols.data());
 
-    std::vector<KokkosScalar>                      xhost(ncol_X);
-    std::vector<KokkosScalar> yhost(ncol_Y);
-    Kokkos::View<KokkosScalar*> x_dev_out("x_dev_out", ncol_X);          
+    Kokkos::View<KokkosScalar**> x_dev_out("x_dev_out", nrow_Y, ncol_X);          
     Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> yin_host(reinterpret_cast<const KokkosScalar*>(&yin(0,0)), nrow_Y, ncol_Y);
     auto y_dev = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, yin_host);
 
@@ -122,16 +120,14 @@ void csr_matmul_post(char                                                       
   auto label =  ((isTranspose || isConjTranspose)?"N":"T");
 	for (int iy = 0; iy < nrow_Y; ++iy) {
 	  KokkosSparse::spmv(exec,
-			    label, (KokkosScalar)1.0, A_crs, Kokkos::subview(y_dev, iy, Kokkos::ALL), (KokkosScalar)0.0, x_dev_out);
-
-		Kokkos::View<KokkosScalar*, Kokkos::HostSpace> h_xhost(xhost.data(), ncol_X);
-		Kokkos::deep_copy(exec, h_xhost, x_dev_out);
-		exec.fence();
-
-		for (int jx = 0; jx < ncol_X; ++jx)
-        xout(iy, jx) += static_cast<ComplexOrRealType>(xhost[jx]);
+			    label, (KokkosScalar)1.0, A_crs, Kokkos::subview(y_dev, iy, Kokkos::ALL), (KokkosScalar)0.0, Kokkos::subview(x_dev_out, iy, Kokkos::ALL));
 	}
 }
+    auto xhost = Kokkos::create_mirror_view_and_copy(x_dev_out);
+  for (int iy = 0; iy < nrow_Y; ++iy) {
+    for (int jx = 0; jx < ncol_X; ++jx)
+        xout(iy, jx) += static_cast<ComplexOrRealType>(xhost(iy, jx));
+  }
 
 	return;
 #endif
