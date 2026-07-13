@@ -59,8 +59,8 @@ void csr_matmul_post(char                                                       
 
 #ifdef PSIMAGLITE_USE_KOKKOS
 	// Use KokkosSparse::spmv by transposing operations
-	using HostExec = Kokkos::DefaultExecutionSpace;
-	HostExec exec;
+	using ExecutionSpace = Kokkos::DefaultExecutionSpace;
+	ExecutionSpace exec;
 	using Ordinal = int;
 
 	using KokkosScalar = typename KokkosScalarTypePost<
@@ -104,11 +104,12 @@ void csr_matmul_post(char                                                       
 		}
 		(void)maxAbs;
 	}
-	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, HostExec> A_crs(
+	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, ExecutionSpace> A_crs(
 	    "A_crs", nrow_A, (int)a.cols(), nnz, vals.data(), rowptr.data(), cols.data());
 
-    std::vector<KokkosScalar>                      xhost;
-    std::vector<KokkosScalar> yhost;
+    std::vector<KokkosScalar>                      xhost(ncol_X);
+    std::vector<KokkosScalar> yhost(ncol_Y);
+    Kokkos::View<KokkosScalar*> x_dev_out("x_dev_out", ncol_X);          
 
 {
 #ifdef PSIMAGLITE_USE_KOKKOS
@@ -117,15 +118,13 @@ void csr_matmul_post(char                                                       
 
 	// For each column of Y perform spmv
 	for (int iy = 0; iy < nrow_Y; ++iy) {
-		yhost.resize((size_t)ncol_Y);
 		for (int j = 0; j < ncol_Y; ++j)
 				yhost[j] = yin(iy, j);
 
 		auto y_dev = Kokkos::create_mirror_view_and_copy(
-		    HostExec(),
+		    ExecutionSpace(),
 		    Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
 		        yhost.data(), ncol_Y));
-		auto x_dev_out = Kokkos::View<KokkosScalar*>("x_dev_out", ncol_X);
 
 		if (isTranspose || isConjTranspose) {
 			KokkosSparse::spmv(exec,
@@ -135,7 +134,6 @@ void csr_matmul_post(char                                                       
 			    "T", (KokkosScalar)1.0, A_crs, y_dev, (KokkosScalar)0.0, x_dev_out);
 		}
 
-		xhost.resize((size_t)ncol_X);
 		Kokkos::View<KokkosScalar*, Kokkos::HostSpace> h_xhost(xhost.data(), ncol_X);
 		Kokkos::deep_copy(exec, h_xhost, x_dev_out);
 		exec.fence();
