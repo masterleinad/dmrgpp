@@ -58,7 +58,7 @@ find_package(Boost REQUIRED)
 target_link_libraries(psimaglite PUBLIC Boost::boost)
 
 find_package(Threads)
-if(Threads_FOUND)
+if(FALSE)
   target_compile_definitions(psimaglite PUBLIC USE_PTHREADS)
   target_link_libraries(psimaglite PUBLIC Threads::Threads)
 endif()

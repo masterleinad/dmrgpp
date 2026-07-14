@@ -116,12 +116,68 @@ void csr_matmul_post(char                                                       
   Kokkos::Profiling::ScopedRegion region("PsimagLite::csr_matmul_post::kernel");
 #endif
 
-	// For each column of Y perform spmv
-  auto label =  ((isTranspose || isConjTranspose)?"N":"T");
-	for (int iy = 0; iy < nrow_Y; ++iy) {
-	  KokkosSparse::spmv(exec,
-			    label, (KokkosScalar)1.0, A_crs, Kokkos::subview(y_dev, iy, Kokkos::ALL), (KokkosScalar)0.0, Kokkos::subview(x_dev_out, iy, Kokkos::ALL));
-	}
+  // Copy CSR arrays to device so the TeamPolicy kernel can access them
+  Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> rowptr_host(rowptr.data(), nrow_A + 1);
+  auto d_rowptr = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, rowptr_host);
+  Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> cols_host(cols.data(), nnz);
+  auto d_cols = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, cols_host);
+  Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> vals_host(vals.data(), nnz);
+  auto d_vals = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, vals_host);
+
+  using team_policy = Kokkos::TeamPolicy<ExecutionSpace>;
+  using member_type = team_policy::member_type;
+
+  // One team per output row iy; let Kokkos pick team/vector sizes
+  team_policy policy(nrow_Y, Kokkos::AUTO);
+  Kokkos::parallel_for("csr_matmul_post::team", policy, KOKKOS_LAMBDA(const member_type& team) {
+    const int iy = team.league_rank();
+
+    // create a subview for the current Y row for faster access
+    auto yrow = Kokkos::subview(y_dev, iy, Kokkos::ALL);
+
+    if (isTranspose || isConjTranspose) {
+      // For transpose: X(iy,ia) += sum_j Y(iy,ja)*A(ia,ja)
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(team, nrow_A), [&](int ia) {
+        int istart = d_rowptr(ia);
+        int iend = d_rowptr(ia + 1);
+        KokkosScalar local_sum = (KokkosScalar)0;
+        // reduce contributions across the nonzeros of row ia
+        Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(team, iend - istart), [&](int ii, KokkosScalar& lsum) {
+          int k = istart + ii;
+          int ja = d_cols(k);
+          KokkosScalar aij = d_vals(k);
+          lsum += yrow(ja) * aij;
+        }, local_sum);
+        // single write per ia (no atomics needed)
+        x_dev_out(iy, ia) += local_sum;
+      });
+    } else {
+      // Non-transpose: X(iy,ja) += sum_ia Y(iy,ia)*A(ia,ja)
+      // Parallelize over ia (TeamThreadRange), then vectorize over nonzeros and use atomics for updates
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(team, nrow_A), [&](int ia) {
+        int istart = d_rowptr(ia);
+        int iend = d_rowptr(ia + 1);
+        KokkosScalar yval = yrow(ia);
+        Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, iend - istart), [&](int ii) {
+          int k = istart + ii;
+          int ja = d_cols(k);
+          KokkosScalar aij = d_vals(k);
+          KokkosScalar prod = yval * aij;
+          if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
+            Kokkos::atomic_add(&x_dev_out(iy, ja), prod);
+          } else {
+            // atomic-add real and imag parts separately for complex numbers
+            Kokkos::atomic_add(&x_dev_out(iy, ja).real(), prod.real());
+            Kokkos::atomic_add(&x_dev_out(iy, ja).imag(), prod.imag());
+          }
+        });
+      });
+    }
+
+    // ensure team finishes before league moves on
+    team.team_barrier();
+  });
+
 }
     auto xhost = Kokkos::create_mirror_view_and_copy(x_dev_out);
   for (int iy = 0; iy < nrow_Y; ++iy) {
