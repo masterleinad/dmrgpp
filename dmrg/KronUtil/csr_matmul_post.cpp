@@ -70,53 +70,31 @@ void csr_matmul_post(char                                                       
 	const int nnz = a.nonZeros();
 
 	// build host arrays
-	std::vector<int> rowptr(nrow_A + 1);
+  Kokkos::View<int*, Kokkos::HostSpace> rowptr_host(Kokkos::view_alloc("rowptr_host", Kokkos::WithoutInitializing), nrow_A + 1);
 	for (int i = 0; i <= nrow_A; ++i)
-		rowptr[i] = a.getRowPtr(i);
+		rowptr_host[i] = a.getRowPtr(i);
 
-	std::vector<int>          cols(nnz);
-	std::vector<KokkosScalar> vals(nnz);
+  Kokkos::View<int*, Kokkos::HostSpace> cols_host(Kokkos::view_alloc("cols_host", Kokkos::WithoutInitializing), nnz);
+  Kokkos::View<KokkosScalar*, Kokkos::HostSpace> vals_host(Kokkos::view_alloc("vals_host", Kokkos::WithoutInitializing), nnz);
 	for (int k = 0; k < nnz; ++k) {
-		cols[k] = a.getCol(k);
+		cols_host[k] = a.getCol(k);
 		if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
-			vals[k] = a.getValue(k);
+			vals_host[k] = a.getValue(k);
 		} else {
 			ComplexOrRealType v = a.getValue(k);
 			if (is_complex && (isConj || isConjTranspose))
 				v = PsimagLite::conj(v);
-			vals[k] = Kokkos::complex<typename ComplexOrRealType::value_type>(v.real(),
-			                                                                  v.imag());
+			vals_host[k] = v;
 		}
 	}
-
-	// build CrsMatrix from raw host arrays; constructor will deep-copy to device
-	{
-		double maxAbs = 0.0;
-		for (int i = 0; i < nnz; ++i) {
-			double v = 0.0;
-			if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True)
-				v = std::abs((double)vals[i]);
-			else
-				v = std::abs((double)vals[i].real())
-				    + std::abs((double)vals[i].imag());
-			if (v > maxAbs)
-				maxAbs = v;
-		}
-		(void)maxAbs;
-	}
-	KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, ExecutionSpace> A_crs(
-	    "A_crs", nrow_A, (int)a.cols(), nnz, vals.data(), rowptr.data(), cols.data());
 
     Kokkos::View<KokkosScalar**> x_dev_out("x_dev_out", nrow_Y, ncol_X);          
     Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> yin_host(reinterpret_cast<const KokkosScalar*>(&yin(0,0)), nrow_Y, ncol_Y);
     auto y_dev = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, yin_host);
 
   // Copy CSR arrays to device so the TeamPolicy kernel can access them
-  Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> rowptr_host(rowptr.data(), nrow_A + 1);
   auto d_rowptr = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, rowptr_host);
-  Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> cols_host(cols.data(), nnz);
   auto d_cols = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, cols_host);
-  Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> vals_host(vals.data(), nnz);
   auto d_vals = Kokkos::create_mirror_view_and_copy(ExecutionSpace{}, vals_host);
 
 {
