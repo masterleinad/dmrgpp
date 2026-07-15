@@ -70,22 +70,14 @@ void csr_matmul_post(char                                                       
 	const int nnz = a.nonZeros();
 
 	// build host arrays
-  Kokkos::View<int*, Kokkos::HostSpace> rowptr_host(Kokkos::view_alloc("rowptr_host", Kokkos::WithoutInitializing), nrow_A + 1);
-	for (int i = 0; i <= nrow_A; ++i)
-		rowptr_host[i] = a.getRowPtr(i);
-
-  Kokkos::View<int*, Kokkos::HostSpace> cols_host(Kokkos::view_alloc("cols_host", Kokkos::WithoutInitializing), nnz);
+  Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> rowptr_host(&a.getRowPtr(0), nrow_A + 1);
+  Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> cols_host(&a.getCol(0), nnz);
   Kokkos::View<KokkosScalar*, Kokkos::HostSpace> vals_host(Kokkos::view_alloc("vals_host", Kokkos::WithoutInitializing), nnz);
 	for (int k = 0; k < nnz; ++k) {
-		cols_host[k] = a.getCol(k);
-		if constexpr (!PsimagLite::IsComplexNumber<ComplexOrRealType>::True) {
-			vals_host[k] = a.getValue(k);
-		} else {
 			ComplexOrRealType v = a.getValue(k);
 			if (is_complex && (isConj || isConjTranspose))
 				v = PsimagLite::conj(v);
 			vals_host[k] = v;
-		}
 	}
 
     Kokkos::View<KokkosScalar**> x_dev_out("x_dev_out", nrow_Y, ncol_X);          
