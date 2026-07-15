@@ -88,6 +88,14 @@ void csr_matmul_post(char                                                       
   Kokkos::Profiling::ScopedRegion region("PsimagLite::csr_matmul_post::kernel");
 #endif
 
+
+#if 1
+       KokkosSparse::CrsMatrix<KokkosScalar, Ordinal, ExecutionSpace> A_crs(
+           "A_crs", nrow_A, (int)a.cols(), nnz, d_vals, d_rowptr, d_cols);
+  const char ta[2] = { trans_A, '\0' };
+KokkosSparse::spmv(ExecutionSpace{}, ta, KokkosScalar(1.), A_crs, y_dev, KokkosScalar(0.), x_dev_out);
+
+#else
   using team_policy = Kokkos::TeamPolicy<ExecutionSpace>;
   using member_type = team_policy::member_type;
 
@@ -142,7 +150,7 @@ void csr_matmul_post(char                                                       
       });
     });
   }
-
+#endif
 }
     auto xhost = Kokkos::create_mirror_view_and_copy(x_dev_out);
   for (int iy = 0; iy < nrow_Y; ++iy) {
