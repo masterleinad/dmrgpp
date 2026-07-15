@@ -72,13 +72,7 @@ void csr_matmul_post(char                                                       
 	// build host arrays
   Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> rowptr_host(&a.getRowPtr(0), nrow_A + 1);
   Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> cols_host(&a.getCol(0), nnz);
-  Kokkos::View<KokkosScalar*, Kokkos::HostSpace> vals_host(Kokkos::view_alloc("vals_host", Kokkos::WithoutInitializing), nnz);
-	for (int k = 0; k < nnz; ++k) {
-			ComplexOrRealType v = a.getValue(k);
-			if (is_complex && (isConj || isConjTranspose))
-				v = PsimagLite::conj(v);
-			vals_host[k] = v;
-	}
+  Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> vals_host(reinterpret_cast<const KokkosScalar*>(&a.getValue(0)), nnz);
 
     Kokkos::View<KokkosScalar**> x_dev_out("x_dev_out", nrow_Y, ncol_X);          
     Kokkos::View<const KokkosScalar**, Kokkos::LayoutLeft, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> yin_host(reinterpret_cast<const KokkosScalar*>(&yin(0,0)), nrow_Y, ncol_Y);
@@ -115,6 +109,8 @@ void csr_matmul_post(char                                                       
         Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(team, istart, iend), [&](int k, KokkosScalar& lsum) {
           int ja = d_cols(k);
           KokkosScalar aij = d_vals(k);
+           if constexpr(is_complex)
+             aij = Kokkos::conj(aij);
           lsum += yrow(ja) * aij;
         }, local_sum);
         Kokkos::single(Kokkos::PerThread(team), [&] () { 
@@ -138,6 +134,8 @@ void csr_matmul_post(char                                                       
         Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, istart, iend), [&](int k) {
           int ja = d_cols(k);
           KokkosScalar aij = d_vals(k);
+  if constexpr(is_complex)
+             aij = Kokkos::conj(aij);
           KokkosScalar prod = yval * aij;
             Kokkos::atomic_add(&x_dev_out(iy, ja), prod);
         });
