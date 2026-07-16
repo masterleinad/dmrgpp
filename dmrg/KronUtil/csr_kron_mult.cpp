@@ -333,74 +333,190 @@ void csr_kron_mult_method(const int  imethod,
 		using team_policy = Kokkos::TeamPolicy<ExecutionSpace>;
 		using member_type = team_policy::member_type;
 
-		team_policy policy(nrow_A, Kokkos::AUTO);
-
-		Kokkos::parallel_for(
-		    "csr_kron_mult::method3", policy, KOKKOS_LAMBDA(const member_type& team) {
-			    const int ia     = team.league_rank();
-			    int       istart = d_rowptrA(ia);
-			    int       iend   = d_rowptrA(ia + 1);
-
-			    Kokkos::parallel_for(
-			        Kokkos::TeamThreadRange(team, istart, iend),
-			        [&](int ka_idx)
-			        {
-				        int          ja  = d_colsA(ka_idx);
-				        KokkosScalar aij = d_valsA(ka_idx);
-				        if constexpr (PsimagLite::IsComplexNumber<
-				                          ComplexOrRealType>::True)
-					        if (isConjTransA)
-						        aij = Kokkos::conj(aij);
-
-				        // Iterate over B by row to avoid scanning the entire
-				        // flattened nnz array and to use row ranges directly on
-				        // device.
-				        Kokkos::parallel_for(
-				            Kokkos::TeamThreadRange(team, nrow_B),
-				            [&](int ib_local)
-				            {
-					            int istartb = d_rowptrB(ib_local);
-					            int iendb   = d_rowptrB(ib_local + 1);
-					            Kokkos::parallel_for(
-					                Kokkos::ThreadVectorRange(
-					                    team, istartb, iendb),
-					                [&](int kb_idx)
-					                {
-						                int          jb  = d_colsB(kb_idx);
-						                KokkosScalar bij = d_valsB(kb_idx);
-						                if constexpr (
-						                    PsimagLite::IsComplexNumber<
-						                        ComplexOrRealType>::True)
-							                if (isConjTransB)
-								                bij = Kokkos::conj(
-								                    bij);
-						                KokkosScalar cij = aij * bij;
-						                int ix = (isTransB || isConjTransB)
-						                    ? jb
-						                    : ib_local;
-						                int jx = (isTransA || isConjTransA)
-						                    ? ja
-						                    : ia;
-						                int iy = (isTransB || isConjTransB)
-						                    ? ib_local
-						                    : jb;
-						                int jy = (isTransA || isConjTransA)
-						                    ? ia
-						                    : ja;
-						                KokkosScalar yv = y_dev(iy, jy);
-						                Kokkos::atomic_add(
-						                    &x_dev_out(ix, jx), cij * yv);
-					                });
-				            });
-			        });
-		    });
-
-		auto xhost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace {}, x_dev_out);
-		for (int ix = 0; ix < nrow_X; ++ix) {
-			for (int jx = 0; jx < ncol_X; ++jx)
-				xout(ix, jx) += static_cast<ComplexOrRealType>(xhost(ix, jx));
+		// Try to use per-team scratch accumulation when A is not transposed
+		// so that jx==ia (constant per team). Limit scratch to 48KB per
+		// team to avoid exceeding shared memory.
+		size_t scratch_bytes = 0;
+		bool   use_scratch   = false;
+		if (!isTransA && !isConjTransA) {
+			size_t tmp = static_cast<size_t>(nrow_X) * sizeof(KokkosScalar);
+			if (tmp <= 48 * 1024) {
+				use_scratch   = true;
+				scratch_bytes = tmp;
+			}
 		}
-	};
+
+		team_policy policy = use_scratch
+		    ? team_policy(nrow_A, Kokkos::AUTO, Kokkos::PerTeam(scratch_bytes))
+		    : team_policy(nrow_A, Kokkos::AUTO);
+
+		if (use_scratch) {
+			Kokkos::parallel_for(
+			    "csr_kron_mult::method3_scratch",
+			    policy,
+			    KOKKOS_LAMBDA(const member_type& team) {
+				    const int ia     = team.league_rank();
+				    int       istart = d_rowptrA(ia);
+				    int       iend   = d_rowptrA(ia + 1);
+
+				    // allocate per-team scratch for accumulation over ix (size
+				    // nrow_X)
+				    KokkosScalar* scratch
+				        = (KokkosScalar*)team.team_shmem().get_shmem(scratch_bytes);
+				    // initialize scratch to zero in parallel
+				    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, nrow_X),
+				                         [&](int i)
+				                         { scratch[i] = KokkosScalar(0); });
+				    team.team_barrier();
+
+				    Kokkos::parallel_for(
+				        Kokkos::TeamThreadRange(team, istart, iend),
+				        [&](int ka_idx)
+				        {
+					        int          ja  = d_colsA(ka_idx);
+					        KokkosScalar aij = d_valsA(ka_idx);
+					        if constexpr (PsimagLite::IsComplexNumber<
+					                          ComplexOrRealType>::True)
+						        if (isConjTransA)
+							        aij = Kokkos::conj(aij);
+
+					        // iterate over B rows and their nonzeros
+					        Kokkos::parallel_for(
+					            Kokkos::TeamThreadRange(team, nrow_B),
+					            [&](int ib_local)
+					            {
+						            int istartb = d_rowptrB(ib_local);
+						            int iendb   = d_rowptrB(ib_local + 1);
+						            Kokkos::parallel_for(
+						                Kokkos::ThreadVectorRange(
+						                    team, istartb, iendb),
+						                [&](int kb_idx)
+						                {
+							                int jb = d_colsB(kb_idx);
+							                KokkosScalar bij
+							                    = d_valsB(kb_idx);
+							                if constexpr (
+							                    PsimagLite::IsComplexNumber<
+							                        ComplexOrRealType>::
+							                        True)
+								                if (isConjTransB)
+									                bij = Kokkos::
+									                    conj(
+									                        bij);
+							                KokkosScalar cij
+							                    = aij * bij;
+							                int ix = (isTransB
+							                          || isConjTransB)
+							                    ? jb
+							                    : ib_local;
+							                int iy = (isTransB
+							                          || isConjTransB)
+							                    ? ib_local
+							                    : jb;
+							                int jy
+							                    = ia; // since !isTransA
+							                          // &&
+							                          // !isConjTransA
+							                KokkosScalar yv
+							                    = y_dev(iy, jy);
+							                // accumulate into per-team
+							                // scratch
+							                Kokkos::atomic_add(
+							                    &scratch[ix], cij * yv);
+						                });
+					            });
+				        });
+
+				    team.team_barrier();
+				    // Now commit scratch into global x_dev_out: one atomic per ix
+				    Kokkos::parallel_for(
+				        Kokkos::TeamThreadRange(team, nrow_X),
+				        [&](int ix)
+				        {
+					        if (scratch[ix] != KokkosScalar(0)) {
+						        Kokkos::atomic_add(&x_dev_out(ix, ia),
+						                           scratch[ix]);
+					        }
+				        });
+			    });
+		} else {
+			Kokkos::parallel_for(
+			    "csr_kron_mult::method3",
+			    policy,
+			    KOKKOS_LAMBDA(const member_type& team) {
+				    const int ia     = team.league_rank();
+				    int       istart = d_rowptrA(ia);
+				    int       iend   = d_rowptrA(ia + 1);
+
+				    Kokkos::parallel_for(
+				        Kokkos::TeamThreadRange(team, istart, iend),
+				        [&](int ka_idx)
+				        {
+					        int          ja  = d_colsA(ka_idx);
+					        KokkosScalar aij = d_valsA(ka_idx);
+					        if constexpr (PsimagLite::IsComplexNumber<
+					                          ComplexOrRealType>::True)
+						        if (isConjTransA)
+							        aij = Kokkos::conj(aij);
+
+					        Kokkos::parallel_for(
+					            Kokkos::TeamThreadRange(team, nrow_B),
+					            [&](int ib_local)
+					            {
+						            int istartb = d_rowptrB(ib_local);
+						            int iendb   = d_rowptrB(ib_local + 1);
+						            Kokkos::parallel_for(
+						                Kokkos::ThreadVectorRange(
+						                    team, istartb, iendb),
+						                [&](int kb_idx)
+						                {
+							                int jb = d_colsB(kb_idx);
+							                KokkosScalar bij
+							                    = d_valsB(kb_idx);
+							                if constexpr (
+							                    PsimagLite::IsComplexNumber<
+							                        ComplexOrRealType>::
+							                        True)
+								                if (isConjTransB)
+									                bij = Kokkos::
+									                    conj(
+									                        bij);
+							                KokkosScalar cij
+							                    = aij * bij;
+							                int          ix = (isTransB
+                                                                                  || isConjTransB)
+							                             ? jb
+							                             : ib_local;
+							                int          jx = (isTransA
+                                                                                  || isConjTransA)
+							                             ? ja
+							                             : ia;
+							                int          iy = (isTransB
+                                                                                  || isConjTransB)
+							                             ? ib_local
+							                             : jb;
+							                int          jy = (isTransA
+                                                                                  || isConjTransA)
+							                             ? ia
+							                             : ja;
+							                KokkosScalar yv
+							                    = y_dev(iy, jy);
+							                Kokkos::atomic_add(
+							                    &x_dev_out(ix, jx),
+							                    cij * yv);
+						                });
+					            });
+				        });
+			    });
+		}
+	});
+
+	auto xhost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace {}, x_dev_out);
+	for (int ix = 0; ix < nrow_X; ++ix) {
+		for (int jx = 0; jx < ncol_X; ++jx)
+			xout(ix, jx) += static_cast<ComplexOrRealType>(xhost(ix, jx));
+	}
+};
 }
 
 template <typename ComplexOrRealType>
