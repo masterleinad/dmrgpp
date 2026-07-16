@@ -317,6 +317,8 @@ void csr_kron_mult_method(const int  imethod,
 		    = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, rowptrA_host);
 		auto d_colsA = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, colsA_host);
 		auto d_valsA = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, valsA_host);
+		auto d_rowptrB
+		    = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, rowptrB_host);
 		auto d_colsB = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, colsB_host);
 		auto d_valsB = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, valsB_host);
 
@@ -350,29 +352,45 @@ void csr_kron_mult_method(const int  imethod,
 					        if (isConjTransA)
 						        aij = Kokkos::conj(aij);
 
-				        // iterate over all B nonzeros and atomically update
-				        // x_dev_out
+				        // Iterate over B by row to avoid scanning the entire
+				        // flattened nnz array and to use row ranges directly on
+				        // device.
 				        Kokkos::parallel_for(
-				            Kokkos::ThreadVectorRange(team, 0, nnzB),
-				            [&](int kb_idx)
+				            Kokkos::TeamThreadRange(team, nrow_B),
+				            [&](int ib_local)
 				            {
-					            int          jb  = d_colsB(kb_idx);
-					            KokkosScalar bij = d_valsB(kb_idx);
-					            if constexpr (PsimagLite::IsComplexNumber<
-					                              ComplexOrRealType>::True)
-						            if (isConjTransB)
-							            bij = Kokkos::conj(bij);
-					            KokkosScalar cij      = aij * bij;
-					            int          ib_local = kb_row_dev(kb_idx);
-					            int ix = (isTransB || isConjTransB) ? jb
-					                                                : ib_local;
-					            int jx = (isTransA || isConjTransA) ? ja : ia;
-					            int iy = (isTransB || isConjTransB) ? ib_local
-					                                                : jb;
-					            int jy = (isTransA || isConjTransA) ? ia : ja;
-					            KokkosScalar yv = y_dev(iy, jy);
-					            Kokkos::atomic_add(&x_dev_out(ix, jx),
-					                               cij * yv);
+					            int istartb = d_rowptrB(ib_local);
+					            int iendb   = d_rowptrB(ib_local + 1);
+					            Kokkos::parallel_for(
+					                Kokkos::ThreadVectorRange(
+					                    team, istartb, iendb),
+					                [&](int kb_idx)
+					                {
+						                int          jb  = d_colsB(kb_idx);
+						                KokkosScalar bij = d_valsB(kb_idx);
+						                if constexpr (
+						                    PsimagLite::IsComplexNumber<
+						                        ComplexOrRealType>::True)
+							                if (isConjTransB)
+								                bij = Kokkos::conj(
+								                    bij);
+						                KokkosScalar cij = aij * bij;
+						                int ix = (isTransB || isConjTransB)
+						                    ? jb
+						                    : ib_local;
+						                int jx = (isTransA || isConjTransA)
+						                    ? ja
+						                    : ia;
+						                int iy = (isTransB || isConjTransB)
+						                    ? ib_local
+						                    : jb;
+						                int jy = (isTransA || isConjTransA)
+						                    ? ia
+						                    : ja;
+						                KokkosScalar yv = y_dev(iy, jy);
+						                Kokkos::atomic_add(
+						                    &x_dev_out(ix, jx), cij * yv);
+					                });
 				            });
 			        });
 		    });
