@@ -1,4 +1,8 @@
 #include "util.h"
+#include <PsimagLite/KokkosType.h>
+
+#include <Kokkos_Core.hpp>
+#include <Kokkos_Profiling_ScopedRegion.hpp>
 
 template <typename ComplexOrRealType>
 void csr_to_den(const PsimagLite::CrsMatrix<ComplexOrRealType>& a,
@@ -40,11 +44,10 @@ void csr_kron_mult_method(const int  imethod,
                           const PsimagLite::MatrixNonOwned<const ComplexOrRealType>& yin,
                           PsimagLite::MatrixNonOwned<ComplexOrRealType>&             xout)
 {
-	const bool is_complex   = PsimagLite::IsComplexNumber<ComplexOrRealType>::True;
-	const int  isTransA     = (transA == 'T') || (transA == 't');
-	const int  isTransB     = (transB == 'T') || (transB == 't');
-	const int  isConjTransA = (transA == 'C') || (transA == 'c');
-	const int  isConjTransB = (transB == 'C') || (transB == 'c');
+	const int isTransA     = (transA == 'T') || (transA == 't');
+	const int isTransB     = (transB == 'T') || (transB == 't');
+	const int isConjTransA = (transA == 'C') || (transA == 'c');
+	const int isConjTransB = (transB == 'C') || (transB == 'c');
 
 	const int nrow_A = a.rows();
 	const int ncol_A = a.cols();
@@ -264,49 +267,121 @@ void csr_kron_mult_method(const int  imethod,
 	} else if (imethod == 3) {
 		/*
 		 * ---------------------------------------------
-		 * C = kron(A,B)
-		 * C([ib,ia], [jb,ja]) = A(ia,ja)*B(ib,jb)
-		 * X([ib,ia]) += C([ib,ia],[jb,ja]) * Y([jb,ja])
+		 * Kokkos implementation of method 3:
+		 * Visit nonzeros of A and B on the device, compute
+		 * X([ib,ia]) += (A(ia,ja)*B(ib,jb)) * Y([jb,ja])
+		 * Use atomics for updates to X. This mirrors the nested
+		 * loops but parallelized for GPUs.
 		 * ---------------------------------------------
 		 */
 
-		int ia = 0;
-		int ka = 0;
-		int ib = 0;
-		int kb = 0;
-		for (ia = 0; ia < nrow_A; ia++) {
-			int istarta = a.getRowPtr(ia);
-			int ienda   = a.getRowPtr(ia + 1);
-			for (ka = istarta; ka < ienda; ka++) {
-				int               ja  = a.getCol(ka);
-				ComplexOrRealType aij = a.getValue(ka);
-				if (is_complex && isConjTransA) {
-					aij = PsimagLite::conj(aij);
-				};
+		Kokkos::Profiling::ScopedRegion region("PsimagLite::csr_kron_mult::method3");
+		using ExecutionSpace = Kokkos::DefaultExecutionSpace;
+		ExecutionSpace exec;
+		using KokkosScalar = typename PsimagLite::KokkosType<ComplexOrRealType>::type;
 
-				for (ib = 0; ib < nrow_B; ib++) {
-					int istartb = b.getRowPtr(ib);
-					int iendb   = b.getRowPtr(ib + 1);
+		const int nnzA = a.nonZeros();
+		const int nnzB = b.nonZeros();
 
-					for (kb = istartb; kb < iendb; kb++) {
-						int               jb  = b.getCol(kb);
-						ComplexOrRealType bij = b.getValue(kb);
-						if (is_complex && isConjTransB) {
-							bij = PsimagLite::conj(bij);
-						};
+		// Host unmanaged views for CSR arrays
+		Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> rowptrA_host(
+		    &a.getRowPtr(0), nrow_A + 1);
+		Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> colsA_host(
+		    &a.getCol(0), nnzA);
+		Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>
+		    valsA_host(reinterpret_cast<const KokkosScalar*>(&a.getValue(0)), nnzA);
 
-						ComplexOrRealType cij = aij * bij;
+		Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> rowptrB_host(
+		    &b.getRowPtr(0), nrow_B + 1);
+		Kokkos::View<const int*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> colsB_host(
+		    &b.getCol(0), nnzB);
+		Kokkos::View<const KokkosScalar*, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>
+		    valsB_host(reinterpret_cast<const KokkosScalar*>(&b.getValue(0)), nnzB);
 
-						int ix = (isTransB || isConjTransB) ? jb : ib;
-						int jx = (isTransA || isConjTransA) ? ja : ia;
-						int iy = (isTransB || isConjTransB) ? ib : jb;
-						int jy = (isTransA || isConjTransA) ? ia : ja;
+		// Build a mapping from flattened B-nnz index -> owning row (ib)
+		std::vector<int> kb_row(nnzB);
+		for (int ibv = 0; ibv < nrow_B; ++ibv) {
+			int ist  = rowptrB_host(ibv);
+			int iend = rowptrB_host(ibv + 1);
+			for (int k = ist; k < iend; ++k)
+				kb_row[k] = ibv;
+		}
+		Kokkos::View<int*> kb_row_dev("kb_row_dev", nnzB);
+		auto               kb_row_dev_host = Kokkos::create_mirror_view(kb_row_dev);
+		for (int k = 0; k < nnzB; ++k)
+			kb_row_dev_host(k) = kb_row[k];
+		Kokkos::deep_copy(kb_row_dev, kb_row_dev_host);
 
-						xout(ix, jx) += cij * yin(iy, jy);
-					};
-				};
-			};
-		};
+		// Copy CSR arrays and Y to device
+		auto d_rowptrA
+		    = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, rowptrA_host);
+		auto d_colsA = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, colsA_host);
+		auto d_valsA = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, valsA_host);
+		auto d_colsB = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, colsB_host);
+		auto d_valsB = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, valsB_host);
+
+		Kokkos::View<KokkosScalar**> x_dev_out("x_dev_out_m3", nrow_X, ncol_X);
+		Kokkos::View<const KokkosScalar**,
+		             Kokkos::LayoutLeft,
+		             Kokkos::HostSpace,
+		             Kokkos::MemoryUnmanaged>
+		     yin_host(reinterpret_cast<const KokkosScalar*>(&yin(0, 0)), nrow_Y, ncol_Y);
+		auto y_dev = Kokkos::create_mirror_view_and_copy(ExecutionSpace {}, yin_host);
+
+		using team_policy = Kokkos::TeamPolicy<ExecutionSpace>;
+		using member_type = team_policy::member_type;
+
+		team_policy policy(nrow_A, Kokkos::AUTO);
+
+		Kokkos::parallel_for(
+		    "csr_kron_mult::method3", policy, KOKKOS_LAMBDA(const member_type& team) {
+			    const int ia     = team.league_rank();
+			    int       istart = d_rowptrA(ia);
+			    int       iend   = d_rowptrA(ia + 1);
+
+			    Kokkos::parallel_for(
+			        Kokkos::TeamThreadRange(team, istart, iend),
+			        [&](int ka_idx)
+			        {
+				        int          ja  = d_colsA(ka_idx);
+				        KokkosScalar aij = d_valsA(ka_idx);
+				        if constexpr (PsimagLite::IsComplexNumber<
+				                          ComplexOrRealType>::True)
+					        if (isConjTransA)
+						        aij = Kokkos::conj(aij);
+
+				        // iterate over all B nonzeros and atomically update
+				        // x_dev_out
+				        Kokkos::parallel_for(
+				            Kokkos::ThreadVectorRange(team, 0, nnzB),
+				            [&](int kb_idx)
+				            {
+					            int          jb  = d_colsB(kb_idx);
+					            KokkosScalar bij = d_valsB(kb_idx);
+					            if constexpr (PsimagLite::IsComplexNumber<
+					                              ComplexOrRealType>::True)
+						            if (isConjTransB)
+							            bij = Kokkos::conj(bij);
+					            KokkosScalar cij      = aij * bij;
+					            int          ib_local = kb_row_dev(kb_idx);
+					            int ix = (isTransB || isConjTransB) ? jb
+					                                                : ib_local;
+					            int jx = (isTransA || isConjTransA) ? ja : ia;
+					            int iy = (isTransB || isConjTransB) ? ib_local
+					                                                : jb;
+					            int jy = (isTransA || isConjTransA) ? ia : ja;
+					            KokkosScalar yv = y_dev(iy, jy);
+					            Kokkos::atomic_add(&x_dev_out(ix, jx),
+					                               cij * yv);
+				            });
+			        });
+		    });
+
+		auto xhost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace {}, x_dev_out);
+		for (int ix = 0; ix < nrow_X; ++ix) {
+			for (int jx = 0; jx < ncol_X; ++jx)
+				xout(ix, jx) += static_cast<ComplexOrRealType>(xhost(ix, jx));
+		}
 	};
 }
 
