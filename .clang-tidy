@@ -1,4 +1,5 @@
 Checks: >
   -*,
+  cppcoreguidelines-owning-memory,
   modernize-use-override,
   modernize-use-nullptr

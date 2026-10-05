@@ -19,7 +19,7 @@ std::ostream& operator<<(std::ostream& os, const MemResolv& mresolv)
 
 	os << "MemResolv garbage: " << mresolv.garbage_.size();
 	for (SizeType i = 0; i < mresolv.garbage_.size(); ++i) {
-		os << reinterpret_cast<void*>(mresolv.garbage_[i]);
+		os << reinterpret_cast<void*>(mresolv.garbage_[i].get());
 		os << " " << mresolv.garbageSize_[i];
 	}
 

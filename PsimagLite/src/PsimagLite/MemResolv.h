@@ -98,9 +98,9 @@ public:
 		char*             ptrLen = reinterpret_cast<char*>(&len);
 		fin.read(ptrLen, sizeof(len));
 		std::cout << "MemResolv read from file len= " << len << "\n";
-		unsigned char* sourcePtr = new unsigned char[len];
-		garbage_.push_back(sourcePtr);
+		garbage_.emplace_back(std::make_unique<unsigned char[]>(len));
 		garbageSize_.push_back(len);
+    unsigned char* sourcePtr = garbage_.back().get();
 		fin.read(reinterpret_cast<char*>(sourcePtr), len);
 		fin.close();
 
@@ -109,16 +109,6 @@ public:
 		long int offset   = newStart - oldStart;
 
 		adjustPointers(sourcePtr, offset);
-	}
-
-	~MemResolv()
-	{
-		delete[] zeroes_;
-		for (SizeType i = 0; i < garbage_.size(); ++i) {
-			unsigned char* ptr = garbage_[i];
-			if (garbageSize_[i] > 0)
-				delete[] ptr;
-		}
 	}
 
 	void save(String filename, String label) const
@@ -180,7 +170,7 @@ public:
 		fout.close();
 	}
 
-	unsigned char* get() { return garbage_[0] + intoOffset_; }
+	unsigned char* get() { return garbage_[0].get() + intoOffset_; }
 
 	template <typename T>
 	void push(MemoryKindEnum type, unsigned int length, T* ptr, String msg = "")
@@ -209,11 +199,12 @@ public:
 		VectorPairType offsetsForHoles;
 		findSizes(total, maxHoleSize, offsetsForHoles);
 		std::cout << "total = " << total << " maxHoleSize= " << maxHoleSize << "\n";
-		unsigned char* ptr = new unsigned char[total];
-		garbage_.push_back(ptr);
+		garbage_.push_back(std::make_unique<unsigned char[]>(total));
 		garbageSize_.push_back(total);
 
 		updateZeroes(maxHoleSize + 1);
+
+    unsigned char* ptr =garbage_.back().get();
 
 		deepCopy(ptr, total, offsetsForHoles);
 
@@ -649,8 +640,8 @@ private:
 	}
 
 	void adjustPointers(unsigned char*, long int) const
-	{
-		/*VectorPairType offsetsForHoles(0);
+	{/*
+		VectorPairType offsetsForHoles(0);
 		RefFunctionType f = &PsimagLite::conj;
 		long int offsetText = (long int)(*f);
 		std::cout<<offsetText<<"\n";
@@ -727,11 +718,11 @@ private:
 
 	long unsigned int           intoOffset_;
 	long int                    refTextPtr_;
-	mutable char*               zeroes_;
+	mutable std::unique_ptr<unsigned char[]> zeroes_;
 	mutable SizeType            lenOfZeroes_;
 	VectorMemoryPointerType     vmptr_;
 	std::vector<SizeType>       rankVector_;
-	std::vector<unsigned char*> garbage_;
+	std::vector<std::unique_ptr<unsigned char[]>> garbage_;
 	std::vector<SizeType>       garbageSize_;
 }; // class MemResolv
 
